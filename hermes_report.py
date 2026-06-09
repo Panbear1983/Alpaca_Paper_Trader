@@ -61,6 +61,35 @@ HEADERS = {
 
 ET = dt.timezone(dt.timedelta(hours=-4))   # ET (no DST correction needed for gate logic)
 
+# Known politician names — bioguide ID → display name + party
+POLITICIAN_NAMES: dict[str, tuple[str, str]] = {
+    "B001277": ("Blumenthal",  "DEM"),
+    "G000583": ("Gottheimer",  "DEM"),
+    "M001157": ("McCaul",      "REP"),
+    "S000168": ("Salazar",     "REP"),
+    "T000490": ("Taylor",      "REP"),
+    "K000389": ("Ro Khanna",   "DEM"),
+}
+
+
+# ── local state loader ────────────────────────────────────────────────────────
+def load_local_state() -> dict:
+    """Read pool, copied-trades, strategy config and TSLA state from disk."""
+    state: dict = {}
+    files = {
+        "pool":    HERE / "pool_state.json",
+        "copied":  HERE / ".copied_trades.json",
+        "config":  HERE / "strategy_config.json",
+        "tsla":    HERE / ".tsla_state.json",
+    }
+    for key, path in files.items():
+        try:
+            with open(path) as f:
+                state[key] = json.load(f)
+        except Exception:
+            state[key] = {}
+    return state
+
 
 # ── Alpaca fetch helpers ───────────────────────────────────────────────────────
 def _get(url: str, **params: Any) -> Any:
@@ -190,6 +219,7 @@ def build_report(
     today_buys:    list[dict],
     quotes:        dict,
     spy_pct:       float | None,
+    local:         dict | None = None,
 ) -> str:
     now_str  = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     equity   = float(acct.get("equity",      0))
@@ -216,7 +246,55 @@ def build_report(
         L.append(f"• SPY today:     `{_p(spy_pct)}`   alpha vs SPY: `{_p(alpha)}`")
     L.append("")
 
-    # ── 2. portfolio holdings ──────────────────────────────────────────────
+    # ── 2. smart money pool ────────────────────────────────────────────────
+    if local:
+        pool_data   = local.get("pool", {})
+        copied_data = local.get("copied", {})
+        pool_members = pool_data.get("pool", [])
+        last_check   = copied_data.get("last_check", "")
+        stats        = copied_data.get("stats", {})
+        by_pol       = copied_data.get("by_politician", {})
+
+        # staleness in days
+        stale_days = None
+        stale_warn = ""
+        if last_check:
+            try:
+                lc = dt.datetime.fromisoformat(last_check.replace("Z", "+00:00"))
+                stale_days = (dt.datetime.now(dt.timezone.utc) - lc).days
+                stale_warn = f"  ⚠ {stale_days}d ago" if stale_days > 3 else f"  {stale_days}d ago"
+            except Exception:
+                pass
+
+        last_copy_fmt = last_check[:10] if last_check else "never"
+        total_buys  = stats.get("total_buys", 0)
+        total_sells = stats.get("total_sells", 0)
+
+        L.append("*Smart Money Pool*")
+        L.append(f"Last copy: `{last_copy_fmt}`{stale_warn}")
+        L.append(f"Total trades copied: `{total_buys}B / {total_sells}S`")
+
+        if pool_members:
+            L.append("```")
+            L.append(f"{'':2} {'Name':<11} {'P':3} {'WR':>4} {'Wt':>4} {'B/S':>5}")
+            L.append("─" * 33)
+            for p in pool_members:
+                pid   = p.get("politician_id", "")
+                name, party = POLITICIAN_NAMES.get(pid, (pid[:10], "?"))
+                wr    = (p.get("metrics") or {}).get("win_rate", 0) * 100
+                wt    = p.get("weight", 0) * 100
+                pol_b = by_pol.get(pid, {}).get("buys", 0)
+                pol_s = by_pol.get(pid, {}).get("sells", 0)
+                prob  = " P" if p.get("is_probationary") else "  "
+                L.append(
+                    f"#{p['rank']}{prob} {name:<11} {party:3} {wr:>3.0f}% {wt:>3.0f}% {pol_b:>2}B/{pol_s}S"
+                )
+            L.append("─" * 33)
+            L.append("P = on probation")
+            L.append("```")
+        L.append("")
+
+    # ── 3. portfolio holdings ──────────────────────────────────────────────
     if positions:
         # Alpaca provides cost_basis = avg_entry_price × qty (accurate for all fills)
         # unrealized_pl  = market_value − cost_basis
@@ -294,7 +372,79 @@ def build_report(
         L.append("_(no buys filled today)_")
     L.append("")
 
-    # ── 4. watchlist ───────────────────────────────────────────────────────
+    # ── 5. strategy status ─────────────────────────────────────────────────
+    if local:
+        cfg         = local.get("config", {})
+        tsla_state  = local.get("tsla", {})
+        pool_cfg    = cfg.get("pool", {})
+        tsla_cfg    = cfg.get("tsla", {})
+        cc_cfg      = cfg.get("capitol_copier", {})
+        copied_data = local.get("copied", {})
+
+        L.append("*Strategy Status*")
+        L.append("```")
+
+        # Capitol Copier
+        last_check = copied_data.get("last_check", "")
+        stale_days = None
+        if last_check:
+            try:
+                lc = dt.datetime.fromisoformat(last_check.replace("Z", "+00:00"))
+                stale_days = (dt.datetime.now(dt.timezone.utc) - lc).days
+            except Exception:
+                pass
+
+        budget   = pool_cfg.get("daily_budget_usd", "?")
+        cap_pct  = pool_cfg.get("max_total_exposure_pct", 0) * 100
+        lag_days = cc_cfg.get("max_disclosure_lag_days", "?")
+        L.append("CAPITOL COPIER")
+        L.append(f"  Budget   ${budget}/day")
+        L.append(f"  Exp cap  {cap_pct:.0f}% of equity")
+        L.append(f"  Max lag  {lag_days}d disclosure")
+        if stale_days is not None:
+            runner_status = f"STALE {stale_days}d" if stale_days > 3 else f"OK ({stale_days}d ago)"
+            L.append(f"  Status   {runner_status}")
+        L.append("  Logic    copy on new disclosure,")
+        L.append("           size by rank weight,")
+        L.append("           2x boost if consensus")
+        L.append("")
+
+        # TSLA
+        tsla_pos = next((p for p in positions if p["symbol"] == "TSLA"), None)
+        entry    = tsla_cfg.get("entry_price", 0)
+        stop_pct = tsla_cfg.get("stop_loss_pct", 0) * 100
+        trig_pct = tsla_cfg.get("trailing_trigger_pct", 0) * 100
+        trail    = tsla_cfg.get("trail_pct", 0) * 100
+        cur_stop = tsla_state.get("highest_stop", entry * (1 - tsla_cfg.get("stop_loss_pct", 0.1)))
+        trailing_on = tsla_state.get("trailing_active", False)
+        L.append("TSLA LADDER")
+        if tsla_pos:
+            cur_px  = float(tsla_pos.get("current_price", 0))
+            qty     = float(tsla_pos.get("qty", 0))
+            upl     = float(tsla_pos.get("unrealized_pl", 0))
+            uplpc   = float(tsla_pos.get("unrealized_plpc", 0)) * 100
+            L.append(f"  Pos    {_qty(qty)}sh @ ${entry:.2f}")
+            L.append(f"  Now    ${cur_px:.2f}  {_p(uplpc)}")
+        else:
+            L.append(f"  Entry  ${entry:.2f}")
+        L.append(f"  Stop   ${cur_stop:.2f}  ({stop_pct:.0f}% rule)")
+        L.append(f"  Trail  {'ON' if trailing_on else 'OFF'}  (triggers +{trig_pct:.0f}%,")
+        L.append(f"         trails {trail:.0f}% below peak)")
+        L.append(f"  Logic  hold until stop hit OR")
+        L.append(f"         buy dips on 5 ladder lvls")
+        ladder = tsla_cfg.get("ladder", [])
+        if ladder:
+            L.append("")
+            L.append(f"  {'LVL':<4} {'DROP':>6} {'PRICE':>8} {'QTY':>4}")
+            for lv in ladder:
+                drop    = lv.get("drop_pct", 0)
+                tgt_px  = entry * (1 - drop)
+                qty_lv  = lv.get("qty", 0)
+                L.append(f"  {lv['level']:<4} -{drop*100:.0f}%  ${tgt_px:>7.2f} {qty_lv:>4}sh")
+        L.append("```")
+        L.append("")
+
+    # ── 6. watchlist ───────────────────────────────────────────────────────
     L.append("*Watchlist*")
     if isinstance(quotes, dict) and "_error" in quotes:
         L.append(f"_quotes unavailable: {quotes['_error']}_")
@@ -415,9 +565,10 @@ def main() -> int:
     history  = fetch_portfolio_history()
     quotes   = fetch_quotes(WATCHLIST)
     spy_pct  = fetch_spy_day_pct()
-    print("[5/5] Building report + charts...",      flush=True)
+    print("[5/5] Loading local state + building report...", flush=True)
+    local = load_local_state()
 
-    report = build_report(acct, positions, today_buys, quotes, spy_pct)
+    report = build_report(acct, positions, today_buys, quotes, spy_pct, local)
     md_path.write_text(report, encoding="utf-8")
 
     eq_done    = chart_equity(history, eq_png)
