@@ -1,0 +1,73 @@
+{
+  "version": 2,
+  "last_updated": "2026-05-23",
+  "updated_by": "manual_pool_init",
+
+  "tsla": {
+    "entry_price": 422.27,
+    "position_qty": 10,
+    "stop_loss_pct": 0.10,
+    "trailing_trigger_pct": 0.10,
+    "trail_pct": 0.05,
+    "ladder": [
+      {"level": "L1", "drop_pct": 0.15, "qty": 15},
+      {"level": "L2", "drop_pct": 0.20, "qty": 20},
+      {"level": "L3", "drop_pct": 0.25, "qty": 25},
+      {"level": "L4", "drop_pct": 0.30, "qty": 30},
+      {"level": "L5", "drop_pct": 0.40, "qty": 40}
+    ]
+  },
+
+  "capitol_copier": {
+    "trade_size_usd": 1000,
+    "max_trade_size_usd": 3000,
+    "min_trade_size_usd": 200,
+    "max_disclosure_lag_days": 45,
+    "dedup_window_days": 45,
+    "legacy_politician_id": "K000389",
+    "legacy_politician_name": "Ro Khanna"
+  },
+
+  "pool": {
+    "max_size": 5,
+    "min_size": 3,
+    "daily_budget_usd": 1500,
+    "backtest_window_days": 90,
+    "consensus_boost_multiplier": 2.0,
+    "consensus_window_days": 14,
+    "max_position_usd": 3000,
+    "min_position_usd": 200,
+    "max_total_exposure_pct": 0.30,
+    "rebalance_frequency": "weekly",
+    "revet_frequency": "monthly",
+    "probation_weeks": 2,
+    "max_weight_change_per_week": 0.15,
+    "auto_pause_win_rate": 0.30,
+    "rank_weights": {
+      "1": 0.40,
+      "2": 0.25,
+      "3": 0.20,
+      "4": 0.10,
+      "5": 0.05
+    }
+  },
+
+  "scoring_weights": {
+    "realized_return_alpha":   0.30,
+    "win_rate":                0.25,
+    "disclosure_speed":        0.15,
+    "sector_diversification":  0.10,
+    "activity_consistency":    0.10,
+    "sample_size_confidence":  0.10
+  },
+
+  "review": {
+    "min_win_rate_threshold": 0.40,
+    "target_win_rate": 0.55,
+    "min_profit_factor": 1.2,
+    "min_sharpe": 0.5,
+    "trade_size_step_usd": 100,
+    "stop_loss_step_pct": 0.01,
+    "trailing_trigger_step_pct": 0.01
+  }
+}

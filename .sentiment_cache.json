@@ -1,0 +1,10 @@
+{
+  "GOOGL": {
+    "score": 3,
+    "multiplier": 1.0,
+    "flag": "",
+    "reasoning": "The recent headlines about GOOGL are mixed in sentiment, with some positive developments like the Data Center Innovation Initiative and Missouri AI investment, but also caution around Europe's debate ",
+    "n_headlines": 10,
+    "checked_at": "2026-05-27T09:46:32.619010+00:00"
+  }
+}

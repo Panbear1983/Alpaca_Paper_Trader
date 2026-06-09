@@ -1,0 +1,49 @@
+{
+  "politicians": {
+    "G000583": {
+      "politician_id": "G000583",
+      "times_in_pool": 1,
+      "weeks_in_pool": 1,
+      "weeks_on_probation": 0,
+      "last_in_pool": "2026-05-27T09:18:23.143431+00:00",
+      "last_score": 0.5681,
+      "party": "democrat"
+    },
+    "B001277": {
+      "politician_id": "B001277",
+      "times_in_pool": 1,
+      "weeks_in_pool": 1,
+      "weeks_on_probation": 0,
+      "last_in_pool": "2026-05-27T09:18:23.143926+00:00",
+      "last_score": 0.7919,
+      "party": "democrat"
+    },
+    "S000168": {
+      "politician_id": "S000168",
+      "times_in_pool": 1,
+      "weeks_in_pool": 1,
+      "weeks_on_probation": 1,
+      "last_in_pool": "2026-05-27T09:18:23.144093+00:00",
+      "last_score": 0.5975,
+      "party": "republican"
+    },
+    "M001157": {
+      "politician_id": "M001157",
+      "times_in_pool": 1,
+      "weeks_in_pool": 1,
+      "weeks_on_probation": 0,
+      "last_in_pool": "2026-05-27T09:18:23.144562+00:00",
+      "last_score": 0.7006,
+      "party": "republican"
+    },
+    "T000490": {
+      "politician_id": "T000490",
+      "times_in_pool": 1,
+      "weeks_in_pool": 1,
+      "weeks_on_probation": 1,
+      "last_in_pool": "2026-05-27T09:18:23.144777+00:00",
+      "last_score": 0.5931,
+      "party": "republican"
+    }
+  }
+}

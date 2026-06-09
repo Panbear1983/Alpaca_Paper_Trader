@@ -1,0 +1,127 @@
+{
+  "reviews": [
+    {
+      "date": "2026-05-18",
+      "spy_return": null,
+      "metrics": {
+        "all": {
+          "n_trades": 0
+        },
+        "capitol_copier": {
+          "n_trades": 0
+        },
+        "tsla_strategy": {
+          "n_trades": 0
+        },
+        "capitol_90d": {
+          "n_trades": 0
+        }
+      },
+      "changes": [
+        "Capitol Copier: no closed trades yet \u2014 holding all params",
+        "TSLA: no closed trades yet \u2014 holding all params"
+      ],
+      "new_politician": null
+    },
+    {
+      "date": "2026-05-22",
+      "spy_return": null,
+      "metrics": {
+        "all": {
+          "n_trades": 7,
+          "win_rate": 0.4286,
+          "avg_return_pct": -0.042,
+          "total_pnl_usd": -24.43,
+          "profit_factor": 0.274,
+          "sharpe": -0.359,
+          "avg_hold_days": 1.1,
+          "avg_trade_score": -0.0035,
+          "best_trade": "AAPL",
+          "worst_trade": "GOOGL"
+        },
+        "capitol_copier": {
+          "n_trades": 4,
+          "win_rate": 0.5,
+          "avg_return_pct": -0.837,
+          "total_pnl_usd": -33.56,
+          "profit_factor": 0.002,
+          "sharpe": -7.948,
+          "avg_hold_days": 1.0,
+          "avg_trade_score": -0.086,
+          "best_trade": "META",
+          "worst_trade": "GOOGL"
+        },
+        "tsla_strategy": {
+          "n_trades": 0
+        },
+        "capitol_90d": {
+          "n_trades": 4,
+          "win_rate": 0.5,
+          "avg_return_pct": -0.837,
+          "total_pnl_usd": -33.56,
+          "profit_factor": 0.002,
+          "sharpe": -7.948,
+          "avg_hold_days": 1.0,
+          "avg_trade_score": -0.086,
+          "best_trade": "META",
+          "worst_trade": "GOOGL"
+        }
+      },
+      "changes": [
+        "Pool weights rebalanced (5 members reordered by 7d momentum)",
+        "TSLA: no closed trades yet \u2014 holding all params"
+      ],
+      "new_politician": null
+    },
+    {
+      "date": "2026-05-27",
+      "spy_return": null,
+      "metrics": {
+        "all": {
+          "n_trades": 7,
+          "win_rate": 0.4286,
+          "avg_return_pct": -0.042,
+          "total_pnl_usd": -24.43,
+          "profit_factor": 0.274,
+          "sharpe": -0.359,
+          "avg_hold_days": 1.1,
+          "avg_trade_score": -0.0035,
+          "best_trade": "AAPL",
+          "worst_trade": "GOOGL"
+        },
+        "capitol_copier": {
+          "n_trades": 4,
+          "win_rate": 0.5,
+          "avg_return_pct": -0.837,
+          "total_pnl_usd": -33.56,
+          "profit_factor": 0.002,
+          "sharpe": -7.948,
+          "avg_hold_days": 1.0,
+          "avg_trade_score": -0.086,
+          "best_trade": "META",
+          "worst_trade": "GOOGL"
+        },
+        "tsla_strategy": {
+          "n_trades": 0
+        },
+        "capitol_90d": {
+          "n_trades": 4,
+          "win_rate": 0.5,
+          "avg_return_pct": -0.837,
+          "total_pnl_usd": -33.56,
+          "profit_factor": 0.002,
+          "sharpe": -7.948,
+          "avg_hold_days": 1.0,
+          "avg_trade_score": -0.086,
+          "best_trade": "META",
+          "worst_trade": "GOOGL"
+        }
+      },
+      "changes": [
+        "Pool weights smoothed (5 members, 15% max change per week)",
+        "TSLA: no closed trades yet \u2014 holding all params"
+      ],
+      "new_politician": null
+    }
+  ]
+}

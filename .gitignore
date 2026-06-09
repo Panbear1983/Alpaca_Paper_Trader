@@ -1,0 +1,21 @@
+# credentials — never commit
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# large derived / cache files
+backtest_cache.json
+
+# report output — keep .md reports, exclude binaries and logs
+reports/*.png
+reports/*.log
+reports/cron.log
+
+# launchd logs
+.logs/
