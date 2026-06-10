@@ -6,7 +6,7 @@
   "tsla": {
     "entry_price": 422.27,
     "position_qty": 10,
-    "stop_loss_pct": 0.10,
+    "stop_loss_pct": 0.09,
     "trailing_trigger_pct": 0.10,
     "trail_pct": 0.05,
     "ladder": [
