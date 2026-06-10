@@ -7,7 +7,7 @@
     "entry_price": 422.27,
     "position_qty": 10,
     "stop_loss_pct": 0.10,
-    "trailing_trigger_pct": 0.10,
+    "trailing_trigger_pct": 0.11,
     "trail_pct": 0.05,
     "ladder": [
       {"level": "L1", "drop_pct": 0.15, "qty": 15},
