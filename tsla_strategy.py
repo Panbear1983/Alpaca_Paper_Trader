@@ -6,7 +6,7 @@ POSITION
   Stop-loss ID: c81a9bd5-6951-40be-9a54-1ee4f374eae0
 
 HARD FLOOR
-  -9% → $384.27 : sell all 10 shares (OTO stop-sell, auto-triggers on fill)
+  -10% → $380.04 : sell all 10 shares (OTO stop-sell, auto-triggers on fill)
 
 TRAILING STOP (activates once price hits +10%)
   Trigger price : $464.50 (+10% from entry)
@@ -47,7 +47,7 @@ HEADERS = {
 
 # ── Strategy parameters ───────────────────────────────────────────────────────
 ENTRY_PRICE      = 422.27
-INITIAL_STOP     = 384.27    # -9%
+INITIAL_STOP     = 380.04    # -10%
 TRAILING_TRIGGER = 464.50    # +10% — trailing activates here
 TRAIL_PCT        = 0.05      # trail 5% below current price
 STOP_ORDER_ID    = "c81a9bd5-6951-40be-9a54-1ee4f374eae0"
