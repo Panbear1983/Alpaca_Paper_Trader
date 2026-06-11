@@ -19,3 +19,6 @@ reports/cron.log
 
 # launchd logs
 .logs/
+
+# autonomous-edit sandbox artifacts (Stage 2 propose/apply)
+proposals/

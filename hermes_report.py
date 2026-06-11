@@ -235,18 +235,7 @@ def build_report(
     L.append("📊 *Alpaca Paper-Trading Report*")
     L.append(f"_{now_str}_\n")
 
-    # ── 1. account summary ─────────────────────────────────────────────────
-    L.append("*Account*")
-    L.append(f"• Equity:        `{_m(equity)}`")
-    L.append(f"• Cash:          `{_m(cash)}`")
-    L.append(f"• Buying Power:  `{_m(bp)}`")
-    L.append(f"• Day P&L:       `{_s(day_pnl)}  ({_p(day_pct)})`")
-    if spy_pct is not None:
-        alpha = day_pct - spy_pct
-        L.append(f"• SPY today:     `{_p(spy_pct)}`   alpha vs SPY: `{_p(alpha)}`")
-    L.append("")
-
-    # ── 2. smart money pool ────────────────────────────────────────────────
+    # ── 1. smart money pool (who we follow) ────────────────────────────────
     if local:
         pool_data   = local.get("pool", {})
         copied_data = local.get("copied", {})
@@ -293,6 +282,17 @@ def build_report(
             L.append("P = on probation")
             L.append("```")
         L.append("")
+
+    # ── 2. account summary ─────────────────────────────────────────────────
+    L.append("*Account*")
+    L.append(f"• Equity:        `{_m(equity)}`")
+    L.append(f"• Cash:          `{_m(cash)}`")
+    L.append(f"• Buying Power:  `{_m(bp)}`")
+    L.append(f"• Day P&L:       `{_s(day_pnl)}  ({_p(day_pct)})`")
+    if spy_pct is not None:
+        alpha = day_pct - spy_pct
+        L.append(f"• SPY today:     `{_p(spy_pct)}`   alpha vs SPY: `{_p(alpha)}`")
+    L.append("")
 
     # ── 3. portfolio holdings ──────────────────────────────────────────────
     if positions:
@@ -462,7 +462,6 @@ def build_report(
             L.append(f"{sym:<6}  mid {mid_s:>9}  bid {bid_s:>9}  ask {ask_s:>9}")
         L.append("```")
 
-    L.append("\n_Hermes daily-report cron_")
     return "\n".join(L)
 
 
@@ -510,23 +509,47 @@ def chart_allocation(positions: list[dict], out: Path) -> Path | None:
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
+def _split_for_telegram(text: str, limit: int = 3900) -> list[str]:
+    """Split a Markdown report into <limit-char chunks, never breaking inside a
+    ``` code block (which would corrupt Markdown parsing)."""
+    chunks: list[str] = []
+    buf: list[str] = []
+    buf_len = 0
+    in_fence = False
+    for ln in text.split("\n"):
+        add = len(ln) + 1
+        if buf and not in_fence and buf_len + add > limit:
+            chunks.append("\n".join(buf))
+            buf, buf_len = [], 0
+        buf.append(ln)
+        buf_len += add
+        if ln.lstrip().startswith("```"):
+            in_fence = not in_fence
+    if buf:
+        chunks.append("\n".join(buf))
+    return chunks
+
+
 def tg_send_text(text: str) -> None:
     if not (TG_TOKEN and TG_CHAT):
         print("[tg] skip — TELEGRAM_BOT_TOKEN / TELEGRAM_HOME_CHANNEL not set",
               file=sys.stderr)
         return
-    r = requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-        json={
-            "chat_id": TG_CHAT,
-            "text": text,
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": True,
-        },
-        timeout=30,
-    )
-    if not r.ok:
-        print(f"[tg] text error {r.status_code}: {r.text}", file=sys.stderr)
+    parts = _split_for_telegram(text)
+    for i, part in enumerate(parts, 1):
+        r = requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json={
+                "chat_id": TG_CHAT,
+                "text": part,
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True,
+            },
+            timeout=30,
+        )
+        if not r.ok:
+            print(f"[tg] text error (part {i}/{len(parts)}) {r.status_code}: {r.text}",
+                  file=sys.stderr)
 
 
 def tg_send_photo(path: Path, caption: str = "") -> None:
@@ -548,7 +571,21 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Alpaca daily report → Telegram")
     ap.add_argument("--dry-run", action="store_true",
                     help="Generate report files but skip Telegram push")
+    ap.add_argument("--gate-close", action="store_true",
+                    help="Only run if NYSE just closed (weekday, 16:xx ET). "
+                         "Lets a DST-agnostic launchd schedule fire daily and "
+                         "self-gate to the real market close.")
     args = ap.parse_args()
+
+    # DST-safe NYSE-close gate: launchd fires daily at two local times that
+    # bracket 16:00 ET across EDT/EST; this check passes for exactly one of them,
+    # and only on actual NYSE weekdays.
+    if args.gate_close:
+        et_now = dt.datetime.now(ET)
+        if et_now.weekday() >= 5 or et_now.hour != 16:
+            print(f"[gate] {et_now:%a %Y-%m-%d %H:%M ET} — not NYSE close, skipping.")
+            return 0
+        print(f"[gate] {et_now:%a %H:%M ET} — NYSE close, running report.")
 
     stamp     = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     md_path   = REPORTS_DIR / f"alpaca_{stamp}.md"
@@ -569,6 +606,24 @@ def main() -> int:
     local = load_local_state()
 
     report = build_report(acct, positions, today_buys, quotes, spy_pct, local)
+
+    # ── Analyst Take — grounded LLM summary via OpenRouter (optional) ──────
+    try:
+        import openrouter_analyst
+        summary = openrouter_analyst.summarize(report)
+        if summary and not summary.startswith("[analyst error"):
+            report += f"\n\n*Analyst Take*\n{summary}"
+            print(f"[analyst] summary added ({openrouter_analyst.MODEL})")
+        elif summary:  # error string — note it, don't break the report
+            report += "\n\n_Analyst summary unavailable this run._"
+            print(f"[analyst] {summary}")
+        else:
+            print("[analyst] no OPENROUTER_API_KEY set — skipping summary")
+    except Exception as e:
+        print(f"[analyst] skipped: {e}")
+
+    report += "\n\n_Alpaca Paper Trader · auto-report at NYSE close_"
+
     md_path.write_text(report, encoding="utf-8")
 
     eq_done    = chart_equity(history, eq_png)
