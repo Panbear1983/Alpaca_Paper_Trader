@@ -1,7 +1,7 @@
 {
   "last_seen_trade_count": 7,
   "last_pool_hash": "[[\"B001277\", 0.2, 1], [\"G000583\", 0.25, 2], [\"M001157\", 0.25, 3], [\"S000168\", 0.1, 4], [\"T000490\", 0.05, 5]]",
-  "last_copied_count": 57,
+  "last_copied_count": 78,
   "last_filled_orders": [
     "ce26f768-9290-473c-a139-836c47fc06a4",
     "465bdf58-093d-47ac-9aed-fd5e00a543e2",
@@ -55,5 +55,5 @@
     "52c196dc-c840-4171-8ded-c98c9215d085"
   ],
   "first_run": false,
-  "last_run_at": "2026-06-11T07:15:38.642241+00:00"
+  "last_run_at": "2026-06-11T13:19:27.566713+00:00"
 }

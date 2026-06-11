@@ -11,6 +11,12 @@ Sizing formula:
 
 State tracking:
   .copied_trades.json   stores tx_ids that have been copied (dedup across all pool members)
+
+Modes:
+  python3 capitol_copier.py              normal trickle-copy run
+  python3 capitol_copier.py --rebalance  one-time reallocation toward --target-pct
+                                          of equity, spread across each pool member's
+                                          most recent distinct disclosed buys
 """
 
 import os, json, re, requests
@@ -173,6 +179,12 @@ def is_eligible_ticker(ticker):
     if not ticker or "/" in ticker or len(ticker) > 5:
         return False
     if ticker in ("XSP", "SPX", "VIX", "NDX"):  # known index symbols
+        return False
+    if ticker == "TSLA":  # TSLA Ladder strategy retired; never re-enter via Capitol Copier
+        return False
+    if any(c.isdigit() for c in ticker):  # foreign listings, e.g. Bovespa "AZZA3"
+        return False
+    if len(ticker) == 5 and ticker.endswith("X"):  # 5-letter mutual/money-market funds, e.g. "VMFXX"
         return False
     return True
 
@@ -337,5 +349,111 @@ def run():
     save_state(state)
 
 
+def rebalance(target_pct=0.60, max_tickers_per_member=5):
+    """One-time reallocation toward `target_pct` of equity invested via Capitol
+    Copier picks, spread across each pool member's most recent distinct buys."""
+    import urllib3
+    urllib3.disable_warnings()
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    state = load_state()
+    cfg   = load_config()
+    pool  = pool_manager.get_pool()
+
+    if not pool:
+        print(f"[{now}] Capitol Copier REBALANCE — POOL IS EMPTY")
+        return
+
+    equity   = get_account_equity() or 0
+    exposure = get_capitol_exposure()
+    target   = equity * target_pct
+    gap      = target - exposure
+
+    print(f"[{now}] Capitol Copier — REBALANCE (target {target_pct*100:.0f}% of equity)")
+    print(f"  Equity:           ${equity:,.2f}")
+    print(f"  Current exposure: ${exposure:,.2f}")
+    print(f"  Target:           ${target:,.2f}")
+    print(f"  Gap to deploy:    ${gap:,.2f}")
+    print()
+
+    if gap <= 0:
+        print("  Already at or above target — nothing to deploy.")
+        return
+
+    min_pos    = cfg["pool"]["min_position_usd"]
+    max_pos    = cfg["pool"]["max_position_usd"]
+    weight_sum = sum(m["weight"] for m in pool) or 1.0
+
+    total_deployed = 0
+    n_orders = 0
+
+    for member in pool:
+        pid    = member["politician_id"]
+        weight = member["weight"] / weight_sum
+        bucket = gap * weight
+        print(f"  [{pid}] weight={weight*100:.0f}% (normalized)  bucket=${bucket:,.2f}")
+
+        if bucket < min_pos:
+            print(f"    -> below ${min_pos} minimum, skipping")
+            continue
+
+        trades = fetch_politician_trades(pid)
+        buys = [t for t in trades
+                if t["tx_type"] == "buy" and is_eligible_ticker(t["ticker"])]
+        buys.sort(key=lambda t: (t.get("pub_date", ""), t.get("tx_date", "")), reverse=True)
+
+        seen, picks = set(), []
+        for t in buys:
+            if t["ticker"] in seen:
+                continue
+            seen.add(t["ticker"])
+            picks.append(t)
+            if len(picks) >= max_tickers_per_member:
+                break
+
+        if not picks:
+            print("    -> no eligible recent buys found, bucket undeployed")
+            continue
+
+        per_ticker = max(min_pos, min(max_pos, bucket / len(picks)))
+        print(f"    -> {len(picks)} ticker(s) @ ${per_ticker:,.2f} each: "
+              f"{', '.join(t['ticker'] for t in picks)}")
+
+        for t in picks:
+            ticker = t["ticker"]
+            result = place_market_order(ticker, "buy", notional=per_ticker)
+            order_id = result.get("id", "")
+            status   = result.get("status", result.get("message", "unknown"))
+            if order_id:
+                if t["tx_id"] not in state["copied"]:
+                    state["copied"].append(t["tx_id"])
+                state["stats"]["total_buys"] += 1
+                state.setdefault("by_politician", {}).setdefault(pid, {"buys": 0, "sells": 0})["buys"] += 1
+                total_deployed += per_ticker
+                n_orders += 1
+                print(f"      ✓ BUY {ticker:<6} ${per_ticker:,.2f}  order {order_id[:8]}")
+            else:
+                print(f"      ✗ BUY {ticker:<6} failed: {status}")
+
+    print()
+    print(f"  Deployed ${total_deployed:,.2f} across {n_orders} orders")
+    new_exposure = exposure + total_deployed
+    if equity:
+        print(f"  New exposure (est): ${new_exposure:,.2f}  ({new_exposure/equity*100:.1f}% of equity)")
+
+    save_state(state)
+
+
 if __name__ == "__main__":
-    run()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rebalance", action="store_true",
+                         help="One-time reallocation toward target equity allocation via Capitol Copier picks")
+    parser.add_argument("--target-pct", type=float, default=0.60,
+                         help="Target fraction of equity actively invested (default 0.60)")
+    args = parser.parse_args()
+
+    if args.rebalance:
+        rebalance(target_pct=args.target_pct)
+    else:
+        run()

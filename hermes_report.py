@@ -74,13 +74,12 @@ POLITICIAN_NAMES: dict[str, tuple[str, str]] = {
 
 # ── local state loader ────────────────────────────────────────────────────────
 def load_local_state() -> dict:
-    """Read pool, copied-trades, strategy config and TSLA state from disk."""
+    """Read pool, copied-trades and strategy config from disk."""
     state: dict = {}
     files = {
         "pool":    HERE / "pool_state.json",
         "copied":  HERE / ".copied_trades.json",
         "config":  HERE / "strategy_config.json",
-        "tsla":    HERE / ".tsla_state.json",
     }
     for key, path in files.items():
         try:
@@ -375,9 +374,7 @@ def build_report(
     # ── 5. strategy status ─────────────────────────────────────────────────
     if local:
         cfg         = local.get("config", {})
-        tsla_state  = local.get("tsla", {})
         pool_cfg    = cfg.get("pool", {})
-        tsla_cfg    = cfg.get("tsla", {})
         cc_cfg      = cfg.get("capitol_copier", {})
         copied_data = local.get("copied", {})
 
@@ -408,39 +405,6 @@ def build_report(
         L.append("           size by rank weight,")
         L.append("           2x boost if consensus")
         L.append("")
-
-        # TSLA
-        tsla_pos = next((p for p in positions if p["symbol"] == "TSLA"), None)
-        entry    = tsla_cfg.get("entry_price", 0)
-        stop_pct = tsla_cfg.get("stop_loss_pct", 0) * 100
-        trig_pct = tsla_cfg.get("trailing_trigger_pct", 0) * 100
-        trail    = tsla_cfg.get("trail_pct", 0) * 100
-        cur_stop = tsla_state.get("highest_stop", entry * (1 - tsla_cfg.get("stop_loss_pct", 0.1)))
-        trailing_on = tsla_state.get("trailing_active", False)
-        L.append("TSLA LADDER")
-        if tsla_pos:
-            cur_px  = float(tsla_pos.get("current_price", 0))
-            qty     = float(tsla_pos.get("qty", 0))
-            upl     = float(tsla_pos.get("unrealized_pl", 0))
-            uplpc   = float(tsla_pos.get("unrealized_plpc", 0)) * 100
-            L.append(f"  Pos    {_qty(qty)}sh @ ${entry:.2f}")
-            L.append(f"  Now    ${cur_px:.2f}  {_p(uplpc)}")
-        else:
-            L.append(f"  Entry  ${entry:.2f}")
-        L.append(f"  Stop   ${cur_stop:.2f}  ({stop_pct:.0f}% rule)")
-        L.append(f"  Trail  {'ON' if trailing_on else 'OFF'}  (triggers +{trig_pct:.0f}%,")
-        L.append(f"         trails {trail:.0f}% below peak)")
-        L.append(f"  Logic  hold until stop hit OR")
-        L.append(f"         buy dips on 5 ladder lvls")
-        ladder = tsla_cfg.get("ladder", [])
-        if ladder:
-            L.append("")
-            L.append(f"  {'LVL':<4} {'DROP':>6} {'PRICE':>8} {'QTY':>4}")
-            for lv in ladder:
-                drop    = lv.get("drop_pct", 0)
-                tgt_px  = entry * (1 - drop)
-                qty_lv  = lv.get("qty", 0)
-                L.append(f"  {lv['level']:<4} -{drop*100:.0f}%  ${tgt_px:>7.2f} {qty_lv:>4}sh")
         L.append("```")
         L.append("")
 

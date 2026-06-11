@@ -1,22 +1,7 @@
 {
   "version": 2,
-  "last_updated": "2026-05-23",
-  "updated_by": "manual_pool_init",
-
-  "tsla": {
-    "entry_price": 422.27,
-    "position_qty": 10,
-    "stop_loss_pct": 0.10,
-    "trailing_trigger_pct": 0.10,
-    "trail_pct": 0.05,
-    "ladder": [
-      {"level": "L1", "drop_pct": 0.15, "qty": 15},
-      {"level": "L2", "drop_pct": 0.20, "qty": 20},
-      {"level": "L3", "drop_pct": 0.25, "qty": 25},
-      {"level": "L4", "drop_pct": 0.30, "qty": 30},
-      {"level": "L5", "drop_pct": 0.40, "qty": 40}
-    ]
-  },
+  "last_updated": "2026-06-11",
+  "updated_by": "tsla_liquidation_capitol_rebalance",
 
   "capitol_copier": {
     "trade_size_usd": 1000,
@@ -35,9 +20,9 @@
     "backtest_window_days": 90,
     "consensus_boost_multiplier": 2.0,
     "consensus_window_days": 14,
-    "max_position_usd": 3000,
+    "max_position_usd": 4000,
     "min_position_usd": 200,
-    "max_total_exposure_pct": 0.30,
+    "max_total_exposure_pct": 0.65,
     "rebalance_frequency": "weekly",
     "revet_frequency": "monthly",
     "probation_weeks": 2,
