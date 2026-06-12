@@ -82,7 +82,7 @@ def summarize(report_text: str, model: str | None = None) -> str | None:
                 "max_tokens":  600,
                 "temperature": 0.4,
             },
-            timeout=60,
+            timeout=20,
         )
         if r.status_code != 200:
             return f"[analyst error: HTTP {r.status_code} {r.text[:120]}]"

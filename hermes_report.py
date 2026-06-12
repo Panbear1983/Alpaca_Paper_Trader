@@ -92,7 +92,7 @@ def load_local_state() -> dict:
 
 # ── Alpaca fetch helpers ───────────────────────────────────────────────────────
 def _get(url: str, **params: Any) -> Any:
-    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+    r = requests.get(url, headers=HEADERS, params=params, timeout=10)
     r.raise_for_status()
     return r.json()
 
@@ -153,7 +153,7 @@ def fetch_spy_day_pct() -> float | None:
             f"{ALPACA_DATA}/stocks/SPY/bars",
             headers=HEADERS,
             params={"timeframe": "1Day", "start": today, "limit": 1},
-            timeout=15,
+            timeout=10,
         )
         bars = r.json().get("bars", [])
         if bars:
@@ -514,7 +514,7 @@ def tg_send_text(text: str) -> None:
                 "parse_mode": "Markdown",
                 "disable_web_page_preview": True,
             },
-            timeout=30,
+            timeout=15,
         )
         if not r.ok:
             print(f"[tg] text error (part {i}/{len(parts)}) {r.status_code}: {r.text}",
@@ -529,7 +529,7 @@ def tg_send_photo(path: Path, caption: str = "") -> None:
             f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
             data={"chat_id": TG_CHAT, "caption": caption},
             files={"photo": fh},
-            timeout=60,
+            timeout=20,
         )
     if not r.ok:
         print(f"[tg] photo error {r.status_code}: {r.text}", file=sys.stderr)
