@@ -482,9 +482,14 @@ def _split_for_telegram(text: str, limit: int = 3900) -> list[str]:
     in_fence = False
     for ln in text.split("\n"):
         add = len(ln) + 1
-        if buf and not in_fence and buf_len + add > limit:
+        if buf and buf_len + add > limit:
+            if in_fence:
+                buf.append("```")
             chunks.append("\n".join(buf))
             buf, buf_len = [], 0
+            if in_fence:
+                buf.append("```")
+                buf_len += 4
         buf.append(ln)
         buf_len += add
         if ln.lstrip().startswith("```"):
