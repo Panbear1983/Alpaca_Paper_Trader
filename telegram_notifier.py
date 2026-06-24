@@ -50,6 +50,31 @@ def send(message, parse_mode="Markdown", silent=False):
 
 # ── Formatted message helpers ────────────────────────────────────────────────
 
+def notify_batch(title, lines, emoji="📊"):
+    """Send ONE consolidated message from a list of action lines, instead of a
+    separate push per trade. Chunks on line boundaries if it exceeds Telegram's
+    4096-char limit. No-op (returns False) when there are no lines."""
+    if not lines:
+        return False
+    header = f"{emoji} *{title}*  ({len(lines)})"
+    full = header + "\n" + "\n".join(lines)
+    if len(full) <= 3900:
+        return send(full)
+    # too long — split across messages on line boundaries
+    ok = True
+    chunk, clen = [header], len(header)
+    for ln in lines:
+        if clen + len(ln) + 1 > 3900:
+            ok = send("\n".join(chunk)) and ok
+            chunk, clen = [header], len(header)
+        chunk.append(ln)
+        clen += len(ln) + 1
+    if len(chunk) > 1:
+        ok = send("\n".join(chunk)) and ok
+    return ok
+
+
+
 def notify_trade(politician_id, ticker, side, size_usd, sentiment=None, consensus=None):
     """Format and send a trade execution notification."""
     emoji = "🟢" if side == "buy" else "🔴"

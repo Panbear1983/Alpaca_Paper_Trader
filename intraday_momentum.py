@@ -206,6 +206,7 @@ def run_tick(cfg, dry_run=False):
     held = {p["symbol"]: p for p in get_positions()}
     entries = state.setdefault("entries", {})
     tag = "[DRY] " if dry_run else ""
+    acts = []   # collect all buys/sells, push ONE consolidated message at end
 
     print(f"  SPY intraday {spy_ret*100:+.2f}%  |  target ${per_name:,.0f}/name × {top_n} "
           f"= {gross:.0f}x ${equity*gross:,.0f}")
@@ -217,11 +218,10 @@ def run_tick(cfg, dry_run=False):
         cur   = float(p.get("current_price") or 0)
         if entry > 0 and cur > 0 and (cur - entry) / entry <= -stop_pct:
             print(f"  {tag}🛑 STOP {sym}  {(cur/entry-1)*100:+.1f}% <= -{stop_pct*100:.0f}%  → sell")
+            acts.append(f"🛑 STOP `{sym}` {(cur/entry-1)*100:+.1f}%")
             if not dry_run:
                 place_market_order(sym, "sell", qty=abs(float(p.get("qty", 0))))
                 entries.pop(sym, None)
-                if tg:
-                    tg.notify_stop_hit(sym, round(cur, 2), abs(float(p.get("qty", 0))))
             held.pop(sym, None)
             desired.discard(sym)
 
@@ -229,6 +229,7 @@ def run_tick(cfg, dry_run=False):
     for sym, p in list(held.items()):
         if sym not in desired:
             print(f"  {tag}↓ ROTATE-OUT {sym}  → sell")
+            acts.append(f"🔴 SELL `{sym}` (rotate out)")
             if not dry_run:
                 place_market_order(sym, "sell", qty=abs(float(p.get("qty", 0))))
                 entries.pop(sym, None)
@@ -240,12 +241,15 @@ def run_tick(cfg, dry_run=False):
         if sym in held:
             continue
         print(f"  {tag}↑ BUY {sym}  ${per_name:,.0f}")
+        acts.append(f"🟢 BUY `{sym}` ${per_name:,.0f}")
         if not dry_run:
             res = place_market_order(sym, "buy", notional=per_name)
             if res.get("id"):
                 entries[sym] = price_by_sym.get(sym)
-                if tg:
-                    tg.send(f"🟢 *Intraday BUY* `{sym}` ${per_name:,.0f}")
+
+    # ── ONE consolidated push for the whole tick ─────────────────────────────
+    if acts and tg and not dry_run:
+        tg.notify_batch(f"Intraday tick · {now_s[11:16]} ET", acts, emoji="⚡")
 
     state["last_rank"] = [s for s, _, _ in ranked[:top_n]]
     if not dry_run:

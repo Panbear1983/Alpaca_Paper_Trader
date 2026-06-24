@@ -233,6 +233,7 @@ def manage_open_positions(cfg, dry_run=False):
     max_exp  = equity * cfg["pool"]["max_total_exposure_pct"]
     tag      = "[DRY] " if dry_run else ""
     actions  = 0
+    acts     = []   # collect all actions, push ONE consolidated message at end
 
     # prune state for positions we no longer hold
     held = {p["symbol"] for p in positions}
@@ -246,11 +247,9 @@ def manage_open_positions(cfg, dry_run=False):
         qty = abs(float(p.get("qty", 0)))
         mv  = abs(float(p.get("market_value", 0)))
         print(f"  {tag}✗ {reason} {sym}  → sell all {qty:g} (${mv:,.0f})")
+        acts.append(f"🔴 SELL `{sym}` ${mv:,.0f} ({reason})")
         if not dry_run and qty > 0:
             place_market_order(sym, "sell", qty=qty)
-            if tg:
-                try: tg.notify_trade("DYNAMIC", sym, "sell", mv)
-                except Exception: pass
         pstate.pop(sym, None)
         actions += 1
 
@@ -298,11 +297,9 @@ def manage_open_positions(cfg, dry_run=False):
         # 1. Stop-loss
         if plpc <= -stop_loss:
             print(f"  {tag}✗ STOP-LOSS {sym}  {plpc*100:+.1f}% <= -{stop_loss*100:.0f}%  → sell all {qty:g}")
+            acts.append(f"🛑 STOP `{sym}` {plpc*100:+.1f}%")
             if not dry_run:
                 place_market_order(sym, "sell", qty=qty)
-                if tg:
-                    try: tg.notify_trade("DYNAMIC", sym, "sell", abs(float(p.get("market_value", 0))))
-                    except Exception: pass
             pstate.pop(sym, None)
             actions += 1
             continue
@@ -311,11 +308,9 @@ def manage_open_positions(cfg, dry_run=False):
         if peak_gain >= trail_trigger and cur <= peak * (1 - trail_giveback):
             print(f"  {tag}✗ TRAIL-STOP {sym}  peak +{peak_gain*100:.0f}%, now {plpc*100:+.1f}% "
                   f"({(cur/peak-1)*100:+.1f}% off peak)  → sell all {qty:g}")
+            acts.append(f"📉 TRAIL `{sym}` +{peak_gain*100:.0f}%→{plpc*100:+.1f}%")
             if not dry_run:
                 place_market_order(sym, "sell", qty=qty)
-                if tg:
-                    try: tg.notify_trade("DYNAMIC", sym, "sell", abs(float(p.get("market_value", 0))))
-                    except Exception: pass
             pstate.pop(sym, None)
             actions += 1
             continue
@@ -330,6 +325,7 @@ def manage_open_positions(cfg, dry_run=False):
                     continue
                 print(f"  {tag}↓ TAKE-PROFIT {sym}  +{plpc*100:.0f}% >= +{thr*100:.0f}%  "
                       f"→ trim {frac*100:.0f}% ({sell_qty:g} sh)")
+                acts.append(f"💰 TAKE-PROFIT `{sym}` +{plpc*100:.0f}% trim {frac*100:.0f}%")
                 if not dry_run:
                     place_market_order(sym, "sell", qty=sell_qty)
                 st["tp_stage"] = idx + 1
@@ -355,11 +351,9 @@ def manage_open_positions(cfg, dry_run=False):
                     break
                 print(f"  {tag}↑ PYRAMID {sym}  +{plpc*100:.0f}% >= +{thr*100:.0f}%  "
                       f"→ add ${add_size:.0f}")
+                acts.append(f"🟢 PYRAMID `{sym}` +${add_size:,.0f}")
                 if not dry_run:
                     place_market_order(sym, "buy", notional=add_size)
-                    if tg:
-                        try: tg.notify_trade("DYNAMIC", sym, "buy", add_size)
-                        except Exception: pass
                 st["adds_done"] = idx + 1
                 exposure += add_size
                 actions += 1
@@ -367,6 +361,9 @@ def manage_open_positions(cfg, dry_run=False):
 
     if actions == 0:
         print("  [manage] no exit/pyramid triggers fired this run.")
+    # ── ONE consolidated push for the whole management cycle ─────────────────
+    if acts and tg and not dry_run:
+        tg.notify_batch("Capitol position management", acts, emoji="🏛")
     if not dry_run:
         save_pos_state(pstate)
 
@@ -420,13 +417,6 @@ def copy_trade(trade, all_pool_buys, state, cfg):
             state["copied"].append(tx_id)
             state["stats"]["total_sells"] += 1
             state.setdefault("by_politician", {}).setdefault(politician_id, {"buys":0,"sells":0})["sells"] += 1
-            # Fire Telegram notification
-            if tg:
-                try:
-                    sell_value_est = float(pos.get("market_value", 0))
-                except (TypeError, ValueError):
-                    sell_value_est = 0
-                tg.notify_trade(politician_id, ticker, "sell", sell_value_est)
             return True, f"sell {order_id[:8]} qty={qty}", 0
         return False, f"sell failed: {status}", 0
 
@@ -477,10 +467,6 @@ def copy_trade(trade, all_pool_buys, state, cfg):
             sentiment_note = f" [sentiment {sentiment['score']}/5 x{sentiment_mult:.2f}]"
             if sentiment.get("flag"):
                 sentiment_note += f" ⚠ {sentiment['flag']}"
-        # Fire Telegram notification if configured
-        if tg:
-            tg.notify_trade(politician_id, ticker, "buy", size,
-                            sentiment=sentiment, consensus=consensus)
         return True, f"buy {order_id[:8]} ${size:.0f}{consensus_note}{sentiment_note}", size
     return False, f"buy failed: {status}", 0
 
@@ -537,6 +523,7 @@ def run(dry_run=False):
 
     new_buys, new_sells, skipped = 0, 0, 0
     total_deployed = 0
+    acts = []   # collect all copied trades, push ONE consolidated message at end
 
     for t in all_trades:
         if t["tx_id"] in state["copied"]:
@@ -552,8 +539,10 @@ def run(dry_run=False):
             if t["tx_type"] == "buy":
                 new_buys += 1
                 total_deployed += size
+                acts.append(f"🟢 BUY `{t['ticker']}` ${size:,.0f}")
             else:
                 new_sells += 1
+                acts.append(f"🔴 SELL `{t['ticker']}`")
             print(f"  ✓ COPIED  [{pid}] {symbol}  disclosed={disclosed}  lag={lag}d  → {reason}")
         else:
             skipped += 1
@@ -561,6 +550,10 @@ def run(dry_run=False):
 
     if new_buys == 0 and new_sells == 0:
         print("\n  No new trades to copy since last run.")
+
+    # ── ONE consolidated push for all newly-copied trades ────────────────────
+    if acts and tg:
+        tg.notify_batch("Capitol Copier · new trades", acts, emoji="🏛")
 
     print(f"\n  Session: +{new_buys} buys, +{new_sells} sells, {skipped} skips, "
           f"${total_deployed:.0f} deployed")

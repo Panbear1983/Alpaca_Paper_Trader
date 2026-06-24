@@ -176,6 +176,9 @@ def check_alpaca_fills(state):
         state["last_filled_orders"] = [o["id"] for o in orders[:50]]
         return 0
 
+    # Collect all fresh fills and push ONE consolidated message instead of a
+    # separate notification per fill.
+    fill_lines = []
     for o in orders:
         oid = o["id"]
         if oid in last_seen:
@@ -186,12 +189,15 @@ def check_alpaca_fills(state):
         qty   = o.get("filled_qty", o.get("qty", "?"))
         price = o.get("filled_avg_price", "?")
 
-        # Stop-sell fills get a special alert
         if otype == "stop" and side == "sell":
-            tg.notify_stop_hit(sym, price, qty)
+            fill_lines.append(f"🛑 STOP SELL `{sym}` {qty} @ ${price}")
         else:
-            tg.send(f"💰 Fill: `{side.upper()}` *{sym}* {qty} @ ${price}")
+            emoji = "🟢" if side == "buy" else "🔴"
+            fill_lines.append(f"{emoji} {side.upper()} `{sym}` {qty} @ ${price}")
         notified += 1
+
+    if fill_lines:
+        tg.notify_batch("Order fills", fill_lines, emoji="💰")
 
     state["last_filled_orders"] = [o["id"] for o in orders[:50]]
     return notified
