@@ -50,6 +50,17 @@
     "max_holdings": 10
   },
 
+  "intraday": {
+    "enabled": true,
+    "universe": ["NVDA","TSLA","AMD","META","AAPL","AVGO","MSFT","AMZN","GOOGL","NFLX",
+                 "SMCI","COIN","MU","QCOM","CRM","PLTR","MRVL","ARM","ASML","INTC",
+                 "ADBE","NOW","PANW","ANET","ORCL"],
+    "top_n": 6,
+    "gross_mult": 4.0,
+    "stop_pct": 0.03,
+    "flatten_minutes": 12
+  },
+
   "scoring_weights": {
     "realized_return_alpha":   0.30,
     "win_rate":                0.25,
