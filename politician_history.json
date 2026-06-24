@@ -12,11 +12,14 @@
     "B001277": {
       "politician_id": "B001277",
       "times_in_pool": 1,
-      "weeks_in_pool": 1,
+      "weeks_in_pool": 0,
       "weeks_on_probation": 0,
       "last_in_pool": "2026-05-27T09:18:23.143926+00:00",
       "last_score": 0.7919,
-      "party": "democrat"
+      "party": "democrat",
+      "last_removal_date": "2026-06-24T04:08:35.106665+00:00",
+      "last_removal_reason": "dropped from top-5 in re-vet (last score 0.792)",
+      "last_removal_score": 0.7919
     },
     "S000168": {
       "politician_id": "S000168",
@@ -30,11 +33,14 @@
     "M001157": {
       "politician_id": "M001157",
       "times_in_pool": 1,
-      "weeks_in_pool": 1,
+      "weeks_in_pool": 0,
       "weeks_on_probation": 0,
       "last_in_pool": "2026-05-27T09:18:23.144562+00:00",
       "last_score": 0.7006,
-      "party": "republican"
+      "party": "republican",
+      "last_removal_date": "2026-06-24T04:08:35.106539+00:00",
+      "last_removal_reason": "dropped from top-5 in re-vet (last score 0.701)",
+      "last_removal_score": 0.7006
     },
     "T000490": {
       "politician_id": "T000490",
@@ -44,6 +50,15 @@
       "last_in_pool": "2026-05-27T09:18:23.144777+00:00",
       "last_score": 0.5931,
       "party": "republican"
+    },
+    "C001068": {
+      "politician_id": "C001068",
+      "times_in_pool": 1,
+      "weeks_in_pool": 0,
+      "weeks_on_probation": 0,
+      "last_in_pool": "2026-06-24T04:08:35.106234+00:00",
+      "last_score": 0.7492,
+      "party": "democrat"
     }
   }
 }

@@ -1,7 +1,7 @@
 {
-  "version": 2,
-  "last_updated": "2026-06-11",
-  "updated_by": "tsla_liquidation_capitol_rebalance",
+  "version": 3,
+  "last_updated": "2026-06-12",
+  "updated_by": "aggressive_sector_concentrated_dynamic_pivot",
 
   "capitol_copier": {
     "trade_size_usd": 1000,
@@ -10,31 +10,44 @@
     "max_disclosure_lag_days": 45,
     "dedup_window_days": 45,
     "legacy_politician_id": "K000389",
-    "legacy_politician_name": "Ro Khanna"
+    "legacy_politician_name": "Ro Khanna",
+    "target_sectors": ["tech", "robotics", "energy", "industrial"],
+    "sentiment_veto_enabled": false
   },
 
   "pool": {
-    "max_size": 5,
+    "max_size": 4,
     "min_size": 3,
-    "daily_budget_usd": 1500,
+    "daily_budget_usd": 2500,
     "backtest_window_days": 90,
-    "consensus_boost_multiplier": 2.0,
+    "consensus_boost_multiplier": 3.0,
     "consensus_window_days": 14,
-    "max_position_usd": 4000,
+    "max_position_usd": 8000,
     "min_position_usd": 200,
-    "max_total_exposure_pct": 0.65,
+    "max_total_exposure_pct": 0.85,
     "rebalance_frequency": "weekly",
     "revet_frequency": "monthly",
     "probation_weeks": 2,
     "max_weight_change_per_week": 0.15,
     "auto_pause_win_rate": 0.30,
     "rank_weights": {
-      "1": 0.40,
-      "2": 0.25,
-      "3": 0.20,
-      "4": 0.10,
-      "5": 0.05
+      "1": 0.50,
+      "2": 0.30,
+      "3": 0.13,
+      "4": 0.07
     }
+  },
+
+  "dynamic_exits": {
+    "enabled": true,
+    "stop_loss_pct": 0.08,
+    "trail_trigger_pct": 0.15,
+    "trail_giveback_pct": 0.08,
+    "take_profit_levels": [[0.25, 0.33], [0.50, 0.50]],
+    "pyramid_levels": [0.10, 0.20],
+    "pyramid_add_frac": 0.50,
+    "prune_off_target": true,
+    "max_holdings": 10
   },
 
   "scoring_weights": {

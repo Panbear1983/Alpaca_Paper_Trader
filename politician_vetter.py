@@ -38,43 +38,8 @@ POOL_FILE         = os.path.join(os.path.dirname(__file__), "pool_state.json")
 VETTING_LOG       = os.path.join(os.path.dirname(__file__), "vetting_log.json")
 BACKTEST_RESULTS  = os.path.join(os.path.dirname(__file__), "backtest_results.json")
 
-# Common sector mapping for diversification scoring (rough heuristic)
-TICKER_SECTOR = {
-    # Tech
-    "AAPL":"tech","MSFT":"tech","GOOGL":"tech","GOOG":"tech","META":"tech","AMZN":"tech",
-    "NVDA":"tech","ADBE":"tech","CRM":"tech","ORCL":"tech","CSCO":"tech","INTC":"tech",
-    "AMD":"tech","MU":"tech","QCOM":"tech","TXN":"tech","AVGO":"tech","NOW":"tech",
-    "PINS":"tech","NFLX":"tech","TSLA":"tech","UBER":"tech","SHOP":"tech","SQ":"tech",
-    "PYPL":"tech","SNOW":"tech","PLTR":"tech","DDOG":"tech","NET":"tech","CRWD":"tech",
-    "APP":"tech","CVNA":"tech",
-    # Financials
-    "JPM":"finance","BAC":"finance","WFC":"finance","C":"finance","MS":"finance",
-    "GS":"finance","BLK":"finance","SCHW":"finance","AXP":"finance","V":"finance",
-    "MA":"finance","COF":"finance","TFC":"finance","USB":"finance","PNC":"finance",
-    "NDAQ":"finance","CME":"finance","ICE":"finance","SPGI":"finance","MCO":"finance",
-    "BRK":"finance","BRKB":"finance",
-    # Healthcare
-    "JNJ":"healthcare","UNH":"healthcare","PFE":"healthcare","MRK":"healthcare",
-    "ABBV":"healthcare","LLY":"healthcare","TMO":"healthcare","DHR":"healthcare",
-    "BMY":"healthcare","ABT":"healthcare","CVS":"healthcare","CI":"healthcare",
-    "HUM":"healthcare","BAX":"healthcare","SYK":"healthcare","ISRG":"healthcare",
-    "MDT":"healthcare","BBIO":"healthcare","ZBH":"healthcare",
-    # Consumer
-    "WMT":"consumer","COST":"consumer","HD":"consumer","LOW":"consumer","TGT":"consumer",
-    "MCD":"consumer","SBUX":"consumer","NKE":"consumer","DIS":"consumer","KO":"consumer",
-    "PEP":"consumer","CMG":"consumer","BKNG":"consumer","LULU":"consumer","CVS":"consumer",
-    # Energy
-    "XOM":"energy","CVX":"energy","COP":"energy","SLB":"energy","EOG":"energy",
-    "PXD":"energy","OXY":"energy","KMI":"energy","WMB":"energy","PSX":"energy",
-    # Industrial
-    "CAT":"industrial","BA":"industrial","HON":"industrial","UPS":"industrial",
-    "LMT":"industrial","RTX":"industrial","GE":"industrial","DE":"industrial",
-    "NOC":"industrial","GD":"industrial","MMM":"industrial",
-    # Utilities/Real Estate/Other
-    "NEE":"utilities","DUK":"utilities","SO":"utilities","ARE":"reit","ACN":"services",
-    "ADP":"services","BR":"services","CTSH":"services","CHTR":"telecom","T":"telecom",
-    "VZ":"telecom","TMUS":"telecom","APO":"finance",
-}
+# Sector mapping for diversification scoring — single source of truth in sectors.py
+from sectors import TICKER_SECTOR
 
 
 # ── Config & state I/O ───────────────────────────────────────────────────────

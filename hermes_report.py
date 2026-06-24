@@ -393,17 +393,32 @@ def build_report(
 
         budget   = pool_cfg.get("daily_budget_usd", "?")
         cap_pct  = pool_cfg.get("max_total_exposure_pct", 0) * 100
-        lag_days = cc_cfg.get("max_disclosure_lag_days", "?")
-        L.append("CAPITOL COPIER")
+        boost    = pool_cfg.get("consensus_boost_multiplier", "?")
+        sectors  = cc_cfg.get("target_sectors", [])
+        dx       = (cfg.get("dynamic_exits") or {})
+        L.append("CAPITOL COPIER (aggressive)")
         L.append(f"  Budget   ${budget}/day")
         L.append(f"  Exp cap  {cap_pct:.0f}% of equity")
-        L.append(f"  Max lag  {lag_days}d disclosure")
+        if sectors:
+            L.append(f"  Sectors  {','.join(sectors)}")
         if stale_days is not None:
             runner_status = f"STALE {stale_days}d" if stale_days > 3 else f"OK ({stale_days}d ago)"
             L.append(f"  Status   {runner_status}")
-        L.append("  Logic    copy on new disclosure,")
+        L.append("  Logic    copy on-target disclosures,")
         L.append("           size by rank weight,")
-        L.append("           2x boost if consensus")
+        L.append(f"           {boost}x boost if consensus")
+        if dx.get("enabled"):
+            sl = dx.get("stop_loss_pct", 0) * 100
+            tt = dx.get("trail_trigger_pct", 0) * 100
+            tg_ = dx.get("trail_giveback_pct", 0) * 100
+            L.append(f"  Exits    stop -{sl:.0f}%, trail +{tt:.0f}%/-{tg_:.0f}%,")
+            L.append("           take-profits + pyramid")
+            maxh = dx.get("max_holdings")
+            if dx.get("prune_off_target") or maxh:
+                bits = []
+                if dx.get("prune_off_target"): bits.append("sectors-only")
+                if maxh: bits.append(f"max {maxh} names")
+                L.append(f"  Concentr {', '.join(bits)}")
         L.append("")
         L.append("```")
         L.append("")

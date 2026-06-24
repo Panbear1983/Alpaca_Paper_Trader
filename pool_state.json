@@ -2,101 +2,70 @@
   "pool": [
     {
       "rank": 1,
-      "politician_id": "B001277",
-      "score": 0.7919,
-      "weight": 0.2,
+      "politician_id": "S000168",
+      "score": 0.7618,
+      "weight": 0.5,
       "components": {
-        "realized_return_alpha": 0.9925581047472788,
-        "win_rate": 0.7895,
+        "realized_return_alpha": 0.8676249092970756,
+        "win_rate": 0.6429,
         "disclosure_speed": 0.5,
-        "sector_diversification": 0.2175925925925926,
+        "sector_diversification": 0.6578947368421053,
         "activity_consistency": 1.0,
         "sample_size_confidence": 1.0
       },
       "metrics": {
-        "n_scored": 19,
+        "n_scored": 28,
         "chosen_window": "30d",
-        "win_rate": 0.7895,
-        "avg_return": 0.207154,
-        "avg_alpha": 0.122329,
-        "median_return": 0.106249,
-        "stdev_return": 0.378994,
+        "win_rate": 0.6429,
+        "avg_return": 0.069327,
+        "avg_alpha": 0.047003,
+        "median_return": 0.023328,
+        "stdev_return": 0.210378,
         "sample_confidence": 1.0,
-        "n_trades_total": 71,
-        "n_trades_in_window": 71
+        "n_trades_total": 61,
+        "n_trades_in_window": 43
       },
-      "party": "democrat",
-      "is_probationary": false,
-      "target_weight": 0.4
+      "party": "republican",
+      "is_probationary": false
     },
     {
       "rank": 2,
-      "politician_id": "G000583",
-      "score": 0.5681,
-      "weight": 0.25,
+      "politician_id": "C001068",
+      "score": 0.7492,
+      "weight": 0.3,
       "components": {
-        "realized_return_alpha": 0.28530032951015394,
-        "win_rate": 0.5882,
+        "realized_return_alpha": 0.9856410669762542,
+        "win_rate": 1.0,
         "disclosure_speed": 0.5,
-        "sector_diversification": 0.6399999999999999,
-        "activity_consistency": 1.0,
-        "sample_size_confidence": 0.9648
+        "sector_diversification": 0.4375,
+        "activity_consistency": 0.38461538461538464,
+        "sample_size_confidence": 0.4628
       },
       "metrics": {
-        "n_scored": 17,
+        "n_scored": 3,
         "chosen_window": "30d",
-        "win_rate": 0.5882,
-        "avg_return": 0.022338,
-        "avg_alpha": -0.022958,
-        "median_return": 0.008489,
-        "stdev_return": 0.094581,
-        "sample_confidence": 0.9648,
-        "n_trades_total": 70,
-        "n_trades_in_window": 61
+        "win_rate": 1.0,
+        "avg_return": 0.151373,
+        "avg_alpha": 0.105723,
+        "median_return": 0.200436,
+        "stdev_return": 0.133415,
+        "sample_confidence": 0.4628,
+        "n_trades_total": 24,
+        "n_trades_in_window": 5
       },
       "party": "democrat",
-      "is_probationary": false,
-      "target_weight": 0.25
+      "is_probationary": false
     },
     {
       "rank": 3,
-      "politician_id": "M001157",
-      "score": 0.7006,
-      "weight": 0.25,
+      "politician_id": "G000583",
+      "score": 0.7149,
+      "weight": 0.13,
       "components": {
-        "realized_return_alpha": 0.653694775395,
-        "win_rate": 0.8571,
-        "disclosure_speed": 0.5,
-        "sector_diversification": 0.5523809523809523,
-        "activity_consistency": 1.0,
-        "sample_size_confidence": 0.6
-      },
-      "metrics": {
-        "n_scored": 35,
-        "chosen_window": "10d",
-        "win_rate": 0.8571,
-        "avg_return": 0.020631,
-        "avg_alpha": 0.015883,
-        "median_return": 0.014406,
-        "stdev_return": 0.031156,
-        "sample_confidence": 0.6,
-        "n_trades_total": 70,
-        "n_trades_in_window": 70
-      },
-      "party": "republican",
-      "is_probationary": false,
-      "target_weight": 0.2
-    },
-    {
-      "rank": 4,
-      "politician_id": "S000168",
-      "score": 0.5975,
-      "weight": 0.1,
-      "components": {
-        "realized_return_alpha": 0.5387322457157784,
+        "realized_return_alpha": 0.868577558017787,
         "win_rate": 0.5,
         "disclosure_speed": 0.5,
-        "sector_diversification": 0.4545454545454546,
+        "sector_diversification": 0.6388888888888888,
         "activity_consistency": 1.0,
         "sample_size_confidence": 0.904
       },
@@ -104,50 +73,45 @@
         "n_scored": 14,
         "chosen_window": "30d",
         "win_rate": 0.5,
-        "avg_return": 0.052573,
-        "avg_alpha": 0.003881,
-        "median_return": 0.000766,
-        "stdev_return": 0.125584,
+        "avg_return": 0.087757,
+        "avg_alpha": 0.047211,
+        "median_return": -0.007957,
+        "stdev_return": 0.286489,
         "sample_confidence": 0.904,
-        "n_trades_total": 44,
-        "n_trades_in_window": 27
+        "n_trades_total": 71,
+        "n_trades_in_window": 60
       },
-      "party": "republican",
-      "is_probationary": true,
-      "target_weight": 0.1
+      "party": "democrat",
+      "is_probationary": false
     },
     {
-      "rank": 5,
+      "rank": 4,
       "politician_id": "T000490",
-      "score": 0.5931,
-      "weight": 0.05,
+      "score": 0.6548,
+      "weight": 0.07,
       "components": {
-        "realized_return_alpha": 0.381015541336023,
-        "win_rate": 0.5714,
+        "realized_return_alpha": 0.6848346498867932,
+        "win_rate": 0.5,
         "disclosure_speed": 0.5,
-        "sector_diversification": 0.608974358974359,
+        "sector_diversification": 0.8157894736842105,
         "activity_consistency": 1.0,
-        "sample_size_confidence": 1.0
+        "sample_size_confidence": 0.678
       },
       "metrics": {
-        "n_scored": 21,
-        "chosen_window": "30d",
-        "win_rate": 0.5714,
-        "avg_return": 0.008848,
-        "avg_alpha": -0.012131,
-        "median_return": 0.013879,
-        "stdev_return": 0.095797,
-        "sample_confidence": 1.0,
+        "n_scored": 14,
+        "chosen_window": "15d",
+        "win_rate": 0.5,
+        "avg_return": 0.017803,
+        "avg_alpha": 0.019402,
+        "median_return": 0.006235,
+        "stdev_return": 0.067515,
+        "sample_confidence": 0.678,
         "n_trades_total": 69,
-        "n_trades_in_window": 53
+        "n_trades_in_window": 31
       },
       "party": "republican",
-      "is_probationary": true,
-      "target_weight": 0.05
+      "is_probationary": true
     }
   ],
-  "updated_at": "2026-05-27T09:19:26.045752",
-  "rebalanced_by": "weekly_momentum",
-  "graduations": [],
-  "smoothing_cap": 0.15
+  "updated_at": "2026-06-24T04:08:35.105188+00:00"
 }

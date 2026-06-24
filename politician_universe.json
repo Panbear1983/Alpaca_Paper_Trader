@@ -1,205 +1,245 @@
 {
   "politicians": [
     {
-      "id": "M001236",
+      "id": "V000139",
       "party": "republican",
-      "trades": 233,
-      "volume": "14.89M",
-      "last_trade": "2026-05-18",
-      "days_since_last": 4
+      "trades": 13,
+      "volume": "129K",
+      "last_trade": "2026-06-16",
+      "days_since_last": 8
     },
     {
-      "id": "E000296",
+      "id": "M001245",
       "party": "democrat",
-      "trades": 36,
-      "volume": "354K",
-      "last_trade": "2026-05-11",
-      "days_since_last": 11
-    },
-    {
-      "id": "K000375",
-      "party": "democrat",
-      "trades": 101,
-      "volume": "1.48M",
-      "last_trade": "2026-05-08",
-      "days_since_last": 14
-    },
-    {
-      "id": "C001103",
-      "party": "republican",
-      "trades": 10,
-      "volume": "13.48M",
-      "last_trade": "2026-05-07",
-      "days_since_last": 15
-    },
-    {
-      "id": "S001203",
-      "party": "democrat",
-      "trades": 17,
-      "volume": "2.38M",
-      "last_trade": "2026-05-07",
-      "days_since_last": 15
-    },
-    {
-      "id": "S001211",
-      "party": "democrat",
-      "trades": 189,
-      "volume": "1.63M",
-      "last_trade": "2026-05-06",
-      "days_since_last": 16
-    },
-    {
-      "id": "B001291",
-      "party": "republican",
-      "trades": 12,
-      "volume": "212K",
-      "last_trade": "2026-05-05",
-      "days_since_last": 17
-    },
-    {
-      "id": "M001234",
-      "party": "democrat",
-      "trades": 114,
-      "volume": "5.79M",
-      "last_trade": "2026-05-04",
-      "days_since_last": 18
-    },
-    {
-      "id": "C001068",
-      "party": "democrat",
-      "trades": 25,
-      "volume": "6.16M",
-      "last_trade": "2026-05-04",
-      "days_since_last": 18
-    },
-    {
-      "id": "S000168",
-      "party": "republican",
-      "trades": 55,
-      "volume": "6.34M",
-      "last_trade": "2026-05-01",
-      "days_since_last": 21
-    },
-    {
-      "id": "C001123",
-      "party": "democrat",
-      "trades": 477,
-      "volume": "30.73M",
-      "last_trade": "2026-05-01",
-      "days_since_last": 21
-    },
-    {
-      "id": "P000608",
-      "party": "democrat",
-      "trades": 202,
-      "volume": "62.63M",
-      "last_trade": "2026-04-30",
-      "days_since_last": 22
-    },
-    {
-      "id": "R000614",
-      "party": "republican",
-      "trades": 10,
-      "volume": "15.82M",
-      "last_trade": "2026-04-30",
-      "days_since_last": 22
-    },
-    {
-      "id": "W000829",
-      "party": "republican",
-      "trades": 66,
-      "volume": "8.42M",
-      "last_trade": "2026-04-30",
-      "days_since_last": 22
-    },
-    {
-      "id": "M001157",
-      "party": "republican",
-      "trades": 522,
-      "volume": "498.81M",
-      "last_trade": "2026-04-30",
-      "days_since_last": 22
-    },
-    {
-      "id": "D000617",
-      "party": "democrat",
-      "trades": 172,
-      "volume": "41.09M",
-      "last_trade": "2026-04-30",
-      "days_since_last": 22
-    },
-    {
-      "id": "M001232",
-      "party": "democrat",
-      "trades": 236,
-      "volume": "2.35M",
-      "last_trade": "2026-04-30",
-      "days_since_last": 22
-    },
-    {
-      "id": "K000389",
-      "party": "democrat",
-      "trades": 850,
-      "volume": "209.10M",
-      "last_trade": "2026-04-29",
-      "days_since_last": 23
-    },
-    {
-      "id": "H001082",
-      "party": "republican",
-      "trades": 196,
-      "volume": "32.28M",
-      "last_trade": "2026-04-29",
-      "days_since_last": 23
-    },
-    {
-      "id": "W000812",
-      "party": "republican",
-      "trades": 18,
-      "volume": "3.85M",
-      "last_trade": "2026-04-29",
-      "days_since_last": 23
-    },
-    {
-      "id": "G000583",
-      "party": "democrat",
-      "trades": 316,
-      "volume": "163.69M",
-      "last_trade": "2026-04-28",
-      "days_since_last": 24
-    },
-    {
-      "id": "F000459",
-      "party": "republican",
-      "trades": 157,
-      "volume": "1.60M",
-      "last_trade": "2026-04-28",
-      "days_since_last": 24
-    },
-    {
-      "id": "B001277",
-      "party": "democrat",
-      "trades": 760,
-      "volume": "114.78M",
-      "last_trade": "2026-04-27",
-      "days_since_last": 25
+      "trades": 7,
+      "volume": "179K",
+      "last_trade": "2026-06-11",
+      "days_since_last": 13
     },
     {
       "id": "T000490",
       "party": "republican",
-      "trades": 179,
-      "volume": "1.60M",
-      "last_trade": "2026-04-27",
-      "days_since_last": 25
+      "trades": 198,
+      "volume": "1.78M",
+      "last_trade": "2026-06-05",
+      "days_since_last": 19
     },
     {
-      "id": "M001204",
+      "id": "B001299",
       "party": "republican",
-      "trades": 27,
-      "volume": "4.30M",
-      "last_trade": "2026-04-24",
+      "trades": 6,
+      "volume": "48K",
+      "last_trade": "2026-06-05",
+      "days_since_last": 19
+    },
+    {
+      "id": "M001239",
+      "party": "republican",
+      "trades": 14,
+      "volume": "112K",
+      "last_trade": "2026-06-04",
+      "days_since_last": 20
+    },
+    {
+      "id": "L000566",
+      "party": "republican",
+      "trades": 15,
+      "volume": "194K",
+      "last_trade": "2026-06-04",
+      "days_since_last": 20
+    },
+    {
+      "id": "M001236",
+      "party": "republican",
+      "trades": 235,
+      "volume": "15.00M",
+      "last_trade": "2026-06-04",
+      "days_since_last": 20
+    },
+    {
+      "id": "C001123",
+      "party": "democrat",
+      "trades": 489,
+      "volume": "32.18M",
+      "last_trade": "2026-06-02",
+      "days_since_last": 22
+    },
+    {
+      "id": "K000398",
+      "party": "republican",
+      "trades": 140,
+      "volume": "2.15M",
+      "last_trade": "2026-06-01",
+      "days_since_last": 23
+    },
+    {
+      "id": "W000798",
+      "party": "republican",
+      "trades": 16,
+      "volume": "398K",
+      "last_trade": "2026-06-01",
+      "days_since_last": 23
+    },
+    {
+      "id": "P000608",
+      "party": "democrat",
+      "trades": 229,
+      "volume": "69.51M",
+      "last_trade": "2026-05-29",
+      "days_since_last": 26
+    },
+    {
+      "id": "M001157",
+      "party": "republican",
+      "trades": 521,
+      "volume": "494.20M",
+      "last_trade": "2026-05-29",
+      "days_since_last": 26
+    },
+    {
+      "id": "B001325",
+      "party": "republican",
+      "trades": 260,
+      "volume": "11.81M",
+      "last_trade": "2026-05-29",
+      "days_since_last": 26
+    },
+    {
+      "id": "B001277",
+      "party": "democrat",
+      "trades": 829,
+      "volume": "141.12M",
+      "last_trade": "2026-05-29",
+      "days_since_last": 26
+    },
+    {
+      "id": "S000168",
+      "party": "republican",
+      "trades": 69,
+      "volume": "6.62M",
+      "last_trade": "2026-05-29",
+      "days_since_last": 26
+    },
+    {
+      "id": "M001232",
+      "party": "democrat",
+      "trades": 289,
+      "volume": "2.88M",
+      "last_trade": "2026-05-29",
+      "days_since_last": 26
+    },
+    {
+      "id": "K000389",
+      "party": "democrat",
+      "trades": 849,
+      "volume": "215.24M",
+      "last_trade": "2026-05-28",
+      "days_since_last": 27
+    },
+    {
+      "id": "D000617",
+      "party": "democrat",
+      "trades": 168,
+      "volume": "40.59M",
+      "last_trade": "2026-05-28",
+      "days_since_last": 27
+    },
+    {
+      "id": "C001068",
+      "party": "democrat",
+      "trades": 24,
+      "volume": "6.87M",
+      "last_trade": "2026-05-27",
       "days_since_last": 28
+    },
+    {
+      "id": "B001236",
+      "party": "republican",
+      "trades": 392,
+      "volume": "3.86M",
+      "last_trade": "2026-05-27",
+      "days_since_last": 28
+    },
+    {
+      "id": "K000376",
+      "party": "republican",
+      "trades": 63,
+      "volume": "3.77M",
+      "last_trade": "2026-05-27",
+      "days_since_last": 28
+    },
+    {
+      "id": "G000583",
+      "party": "democrat",
+      "trades": 320,
+      "volume": "165.75M",
+      "last_trade": "2026-05-27",
+      "days_since_last": 28
+    },
+    {
+      "id": "D000624",
+      "party": "democrat",
+      "trades": 25,
+      "volume": "923K",
+      "last_trade": "2026-05-26",
+      "days_since_last": 29
+    },
+    {
+      "id": "P000595",
+      "party": "democrat",
+      "trades": 23,
+      "volume": "380K",
+      "last_trade": "2026-05-21",
+      "days_since_last": 34
+    },
+    {
+      "id": "S001229",
+      "party": "republican",
+      "trades": 632,
+      "volume": "207.90M",
+      "last_trade": "2026-05-20",
+      "days_since_last": 35
+    },
+    {
+      "id": "M001243",
+      "party": "republican",
+      "trades": 315,
+      "volume": "71.55M",
+      "last_trade": "2026-05-20",
+      "days_since_last": 35
+    },
+    {
+      "id": "A000372",
+      "party": "republican",
+      "trades": 84,
+      "volume": "5.27M",
+      "last_trade": "2026-05-19",
+      "days_since_last": 36
+    },
+    {
+      "id": "A000148",
+      "party": "democrat",
+      "trades": 9,
+      "volume": "293K",
+      "last_trade": "2026-05-18",
+      "days_since_last": 37
+    },
+    {
+      "id": "D000399",
+      "party": "democrat",
+      "trades": 61,
+      "volume": "488K",
+      "last_trade": "2026-05-15",
+      "days_since_last": 40
+    },
+    {
+      "id": "F000450",
+      "party": "republican",
+      "trades": 128,
+      "volume": "2.03M",
+      "last_trade": "2026-05-15",
+      "days_since_last": 40
     }
   ],
-  "scanned_at": "2026-05-22T19:32:55.617597+00:00"
+  "scanned_at": "2026-06-24T03:51:39.365589+00:00"
 }
