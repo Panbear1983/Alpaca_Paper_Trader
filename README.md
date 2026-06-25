@@ -82,12 +82,64 @@ An independent position that buys additional TSLA shares at pre-set price drops 
 
 ---
 
+## Interactive TUI Cockpit
+
+`tui.py` is a live [Textual](https://textual.textualize.io) dashboard over the paper account. It **monitors** the account + positions in real time and can **act** on them — flatten everything, run a strategy cycle on demand, or place manual buy/sell orders. Unlike the background scripts, it's a hands-on cockpit you supervise and steer.
+
+> **⚠️ Paper vs Live — the single switch.** Every action (TUI or script) trades wherever `ALPACA_BASE_URL` points. The shipped value is the **paper** endpoint (`https://paper-api.alpaca.markets/v2`) — simulated money, no real risk. Changing it to `https://api.alpaca.markets` makes **all** orders real-money live. There is no other guard in code; this URL is the only thing standing between paper and live.
+
+### Launch
+
+```bash
+source venv/bin/activate        # or: pip install -r requirements.txt
+python3 tui.py                  # needs a real terminal (full-screen app)
+```
+
+### Screen layout (top → bottom)
+
+1. **Header** — app title + live clock.
+2. **Summary line** — Equity, Cash, RegT (2x) & Daytrading (4x) buying power, Day P&L (green/red), Exposure (leverage).
+3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
+4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `S` sells.
+5. **Event log** — scrolling refreshes, dry-run output, order confirmations, errors.
+
+Data auto-refreshes every **8 seconds** (or `r` to force it).
+
+### Keys
+
+| Key | Action | Needs ARM? | Confirm modal? |
+|-----|--------|:----------:|:--------------:|
+| `r` | Refresh now | — | — |
+| `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
+| `a` | Arm / Disarm toggle | — | — |
+| `q` | Quit | — | — |
+| `F` | **Flatten ALL** positions to cash | ✅ | ✅ |
+| `T` | Live intraday momentum tick | ✅ | ✅ |
+| `C` | Live Capitol Copier cycle | ✅ | ✅ |
+| `B` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
+| `S` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
+
+### Arm / Disarm safety
+
+The cockpit boots **DISARMED** (read-only). Every account-mutating key (`F` `T` `C` `B` `S`) passes **two** independent gates:
+
+1. **ARM switch** — order keys are inert until you press `a` (arm bar turns red). Pressing one while disarmed just logs `DISARMED — press 'a' first`.
+2. **Confirm modal** — even when armed, each action pops a Yes/No dialog showing exactly what it will do (`y`/Enter = Yes, `n`/Esc = No).
+
+So nothing executes until you've deliberately armed *and* confirmed. Press `a` again to disarm.
+
+See [`TUI_GUIDE.md`](TUI_GUIDE.md) for the full ASCII layout diagram and a session walkthrough.
+
+---
+
 ## Scripts
 
 | Script | Role |
 |--------|------|
+| `tui.py` | **Interactive trading cockpit** — live Textual dashboard; monitors account/positions and can flatten, run strategy cycles, or place manual buy/sell orders (arm + confirm gated). |
 | `hermes_report.py` | **Main daily report** — fetches all Alpaca data, builds 4-part Telegram report + charts. Runs at 4 PM ET via launchd. |
 | `capitol_copier.py` | Scrapes Capitol Trades, copies qualifying politician buys/sells to Alpaca |
+| `intraday_momentum.py` | Intraday momentum / relative-strength day-trading strategy (4x DT buying power, flat-to-cash daily) |
 | `trader.py` | Base Alpaca API wrapper (`get_account`, `get_positions`, `place_order`, `get_orders`) |
 | `tsla_strategy.py` | TSLA trailing-stop + ladder strategy execution |
 | `pool_manager.py` | Manages pool membership, trade sizing, consensus detection |
@@ -223,8 +275,10 @@ launchd (hourly)
 
 ```
 Alpaca_Paper_Trader/
+├── tui.py                    # interactive trading cockpit (Textual)
 ├── hermes_report.py          # daily report entry point
 ├── capitol_copier.py         # smart money copy engine
+├── intraday_momentum.py      # intraday RS day-trading strategy (4x)
 ├── trader.py                 # Alpaca API base wrapper
 ├── tsla_strategy.py          # TSLA ladder strategy
 ├── pool_manager.py           # pool membership + trade sizing

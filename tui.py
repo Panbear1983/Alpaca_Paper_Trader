@@ -34,7 +34,7 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import (
-    Button, DataTable, Footer, Header, Input, Label, RichLog, Static,
+    Button, DataTable, Header, Input, Label, RichLog, Static,
 )
 
 import hermes_report as hr
@@ -47,6 +47,16 @@ def _f(x, default=0.0):
         return float(x)
     except (TypeError, ValueError):
         return default
+
+
+# Key-hint line for the footer. Plain text with spaces so it wraps onto extra
+# lines when the terminal is narrow (the built-in Footer clips instead).
+KEY_HINTS = (
+    "[b]r[/b] refresh   [b]d[/b] dry-run   [b]a[/b] arm/disarm   [b]q[/b] quit"
+    "   •   "
+    "[b]F[/b] flatten   [b]T[/b] tick   [b]C[/b] capitol   "
+    "[b]B[/b] buy   [b]S[/b] sell"
+)
 
 
 # ── Modals ───────────────────────────────────────────────────────────────────
@@ -114,6 +124,13 @@ class AlpacaTUI(App):
     #armbar  { height: 1; content-align: center middle; }
     #holdings { height: 1fr; }
     #log { height: 12; border: solid $accent; }
+    #keys {
+        dock: bottom;
+        height: auto;
+        padding: 0 1;
+        background: $panel;
+        color: $text-muted;
+    }
     ConfirmModal, BuyModal { align: center middle; }
     #dialog { width: 64; height: auto; padding: 1 2; background: $surface; border: thick $accent; }
     #buttons { height: auto; align-horizontal: center; }
@@ -144,7 +161,7 @@ class AlpacaTUI(App):
         yield Static(id="armbar")
         yield DataTable(id="holdings", cursor_type="row", zebra_stripes=True)
         yield RichLog(id="log", highlight=False, markup=True)
-        yield Footer()
+        yield Static(KEY_HINTS, id="keys")
 
     def on_mount(self) -> None:
         t = self.query_one("#holdings", DataTable)
