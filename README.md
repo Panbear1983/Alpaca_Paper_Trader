@@ -98,7 +98,7 @@ python3 tui.py                  # needs a real terminal (full-screen app)
 ### Screen layout (top → bottom)
 
 1. **Header** — app title + live clock.
-2. **Summary line** — Equity, Cash, RegT (2x) & Daytrading (4x) buying power, Day P&L (green/red), Exposure (leverage).
+2. **Summary line** — Equity, Cash, RegT (2x) & Daytrading (4x) buying power, Day P&L (green/red), Exposure (leverage). Second row shows a **MARKET OPEN / MARKET CLOSED** badge; when closed it notes that orders queue to the next open. Orders are `time_in_force=day` market orders, so anything placed while the market is closed is **queued by Alpaca and fills at the next open** — and arming while closed logs a reminder of this.
 3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
 4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `s` sells.
 5. **Event log** — scrolling refreshes, dry-run output, order confirmations, errors.

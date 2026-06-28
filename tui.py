@@ -193,6 +193,8 @@ class AlpacaTUI(App):
     def __init__(self):
         super().__init__()
         self._syms: list[str] = []   # holdings symbols in row order (for sell)
+        self.market_open: bool | None = None   # None until first clock fetch
+        self._next_open: str = "?"             # human-readable next-open time
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -216,6 +218,10 @@ class AlpacaTUI(App):
 
     def action_arm(self) -> None:
         self.armed = not self.armed
+        if self.armed and self.market_open is False:
+            self._log(
+                "[yellow]⚠ Market CLOSED — any orders you place now will not fill "
+                f"immediately. They QUEUE and execute at the next open ({self._next_open}).[/]")
 
     def watch_armed(self, val: bool) -> None:
         bar = self.query_one("#armbar", Static)
@@ -243,9 +249,28 @@ class AlpacaTUI(App):
         except Exception as e:
             self.call_from_thread(self._log, f"[red]refresh error: {e}[/]")
             return
-        self.call_from_thread(self._apply, acct, positions)
+        try:
+            clk = im.get_clock()
+        except Exception:
+            clk = None
+        self.call_from_thread(self._apply, acct, positions, clk)
 
-    def _apply(self, acct: dict, positions: list[dict]) -> None:
+    def _market_badge(self, clk: dict | None) -> str:
+        """Update market state from the clock and return a status badge string."""
+        if clk is None:
+            self.market_open = None
+            return "[dim] market ? [/]"
+        self.market_open = bool(clk.get("is_open"))
+        nxt = clk.get("next_open") or ""
+        try:
+            self._next_open = dt.datetime.fromisoformat(nxt).strftime("%a %m-%d %H:%M ET")
+        except ValueError:
+            self._next_open = nxt or "?"
+        if self.market_open:
+            return "[b black on green] MARKET OPEN [/]"
+        return f"[b black on yellow] MARKET CLOSED [/][yellow] orders queue → {self._next_open}[/]"
+
+    def _apply(self, acct: dict, positions: list[dict], clk: dict | None = None) -> None:
         equity = _f(acct.get("equity"))
         cash   = _f(acct.get("cash"))
         last   = _f(acct.get("last_equity"), equity)
@@ -260,7 +285,8 @@ class AlpacaTUI(App):
             f"Equity [b]${equity:,.0f}[/]   Cash ${cash:,.0f}   "
             f"RegT(2x) ${rt:,.0f}   DT(4x) ${dtbp:,.0f}   "
             f"DayP&L [{pc}]{daypl:+,.0f} ({daypct:+.2f}%)[/]   "
-            f"Exposure [b]{lev:.2f}x[/]"
+            f"Exposure [b]{lev:.2f}x[/]\n"
+            f"{self._market_badge(clk)}"
         )
 
         t = self.query_one("#holdings", DataTable)

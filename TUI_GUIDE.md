@@ -42,7 +42,9 @@ Five regions:
 1. **Header** — app title and a live clock.
 2. **Summary line** — Equity, Cash, RegT buying power (2x), Day-trading buying
    power (4x), Day P&L (green/red), and Exposure (leverage = long market value
-   / equity).
+   / equity). A second row shows a **MARKET OPEN / MARKET CLOSED** badge. When
+   closed, orders are queued by Alpaca and fill at the next open — arming while
+   closed logs a reminder of this.
 3. **Arm bar** — your safety indicator.
    - **Green "DISARMED — safe"** = read-only, mutating keys do nothing.
    - **Red "ARMED — live orders ENABLED"** = order keys are hot.
