@@ -17,25 +17,63 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Kept for backward compatibility / direct importers.
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
 API_BASE = "https://api.telegram.org"
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "strategy_config.json")
 
 
-def _is_configured():
-    return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+# ── Channel resolution ────────────────────────────────────────────────────────
+# Optional "telegram" block in strategy_config.json lets new bots/channels be
+# added without code changes. Channels reference ENV-VAR NAMES (never tokens):
+#   "telegram": {
+#     "default_channel": "home",
+#     "channels": { "home": { "token_env": "TELEGRAM_BOT_TOKEN",
+#                             "chat_env":  "TELEGRAM_CHAT_ID" } }
+#   }
+# Falls back to TELEGRAM_BOT_TOKEN + (TELEGRAM_CHAT_ID | TELEGRAM_HOME_CHANNEL)
+# when no config is present, so existing setups keep working.
+
+def _load_channels():
+    try:
+        with open(CONFIG_FILE) as f:
+            tg = json.load(f).get("telegram", {}) or {}
+        return tg.get("channels", {}) or {}, tg.get("default_channel", "")
+    except Exception:
+        return {}, ""
 
 
-def send(message, parse_mode="Markdown", silent=False):
-    """Send a single message to your Telegram. Returns True on success."""
-    if not _is_configured():
-        # Silent fail when no token — useful during dev
+def _resolve(channel=None):
+    """Resolve a (token, chat_id) pair for a named channel, with env fallback."""
+    channels, default = _load_channels()
+    name = channel or default
+    ch = channels.get(name, {}) if name else {}
+    token = os.getenv(ch.get("token_env", ""), "") if ch.get("token_env") else ""
+    chat  = os.getenv(ch.get("chat_env", ""), "")  if ch.get("chat_env")  else ""
+    if not token:
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not chat:
+        chat = os.getenv("TELEGRAM_CHAT_ID", "") or os.getenv("TELEGRAM_HOME_CHANNEL", "")
+    return token, chat
+
+
+def _is_configured(channel=None):
+    token, chat = _resolve(channel)
+    return bool(token and chat)
+
+
+def send(message, parse_mode="Markdown", silent=False, channel=None):
+    """Send a single message to a Telegram channel. Returns True on success."""
+    token, chat = _resolve(channel)
+    if not (token and chat):
+        # Silent fail when unconfigured — useful during dev
         return False
 
-    url = f"{API_BASE}/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = f"{API_BASE}/bot{token}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": chat,
         "text": message,
         "parse_mode": parse_mode,
         "disable_notification": silent,
@@ -45,6 +83,25 @@ def send(message, parse_mode="Markdown", silent=False):
         return r.status_code == 200
     except Exception as e:
         print(f"[telegram] send failed: {e}")
+        return False
+
+
+def send_photo(path, caption="", channel=None):
+    """Send an image (e.g. a chart PNG) to a Telegram channel via sendPhoto."""
+    token, chat = _resolve(channel)
+    if not (token and chat):
+        return False
+    try:
+        with open(path, "rb") as fh:
+            r = requests.post(
+                f"{API_BASE}/bot{token}/sendPhoto",
+                data={"chat_id": chat, "caption": caption},
+                files={"photo": fh},
+                timeout=20,
+            )
+        return r.status_code == 200
+    except Exception as e:
+        print(f"[telegram] send_photo failed: {e}")
         return False
 
 

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.alpacapapertrader.report_scheduler</string>
+
+  <!-- Heartbeat: fire every 10 min. The report TIME lives in
+       strategy_config.json -> report_schedule (config/TUI-editable), and
+       report_scheduler.py self-gates + dedupes to one report per day. This
+       replaces the old hardcoded 16:08/17:08 close_report job. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Frameworks/Python.framework/Versions/3.11/bin/python3</string>
+    <string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/report_scheduler.py</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader</string>
+
+  <key>StartInterval</key><integer>600</integer>
+
+  <key>StandardOutPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/report_scheduler.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/report_scheduler.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

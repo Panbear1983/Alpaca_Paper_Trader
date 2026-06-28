@@ -111,6 +111,8 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 |-----|--------|:----------:|:--------------:|
 | `r` | Refresh now | — | — |
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
+| `p` | **Push the full portfolio report** to Telegram now (same format as the daily report) | — | — |
+| `g` | Toggle the **scheduled** auto-report on/off (`report_schedule.enabled`) | — | — |
 | `a` | Arm / Disarm toggle | — | — |
 | `q` | Quit | — | — |
 | `f` | **Flatten ALL** positions to cash | ✅ | ✅ |
@@ -129,6 +131,18 @@ The cockpit boots **DISARMED** (read-only). Every account-mutating key (`f` `t` 
 
 So nothing executes until you've deliberately armed *and* confirmed. Press `a` again to disarm.
 
+### Telegram notifications
+
+When you execute an action in the TUI (buy/sell/flatten/rebalance/tick/capitol),
+it sends a one-line **"submitted"** alert to Telegram via the existing
+`telegram_notifier.py` (same **@Panbear_Hermes_bot** the daily report uses). Bulk
+actions (flatten/rebalance) send a single batched message, and alerts fired while
+the market is closed note that the order is **queued to the next open**. Market
+open↔closed transitions also ping once. This is **send-only** — it does not poll,
+so it never conflicts with other consumers of the bot. Mute it via
+`strategy_config.json` → `"tui": { "telegram_notify": false }`. The daily report
+(`hermes_report.py`) is unaffected.
+
 See [`TUI_GUIDE.md`](TUI_GUIDE.md) for the full ASCII layout diagram and a session walkthrough.
 
 ---
@@ -138,7 +152,8 @@ See [`TUI_GUIDE.md`](TUI_GUIDE.md) for the full ASCII layout diagram and a sessi
 | Script | Role |
 |--------|------|
 | `tui.py` | **Interactive trading cockpit** — live Textual dashboard; monitors account/positions and can flatten, run strategy cycles, or place manual buy/sell orders (arm + confirm gated). |
-| `hermes_report.py` | **Main daily report** — fetches all Alpaca data, builds 4-part Telegram report + charts. Runs at 4 PM ET via launchd. |
+| `hermes_report.py` | **Daily report** — `run_report()` builds the 4-part Telegram report + charts; callable from the CLI, the TUI (`p`), and the scheduler. |
+| `report_scheduler.py` | Config-driven trigger for the daily report — launchd heartbeat fires it; it self-gates on `report_schedule` (time/on-off in `strategy_config.json`) and dedupes to one/day. Replaces the rigid 4 PM launchd job. |
 | `capitol_copier.py` | Scrapes Capitol Trades, copies qualifying politician buys/sells to Alpaca |
 | `intraday_momentum.py` | Intraday momentum / relative-strength day-trading strategy (4x DT buying power, flat-to-cash daily) |
 | `trader.py` | Base Alpaca API wrapper (`get_account`, `get_positions`, `place_order`, `get_orders`) |

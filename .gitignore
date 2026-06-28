@@ -10,6 +10,9 @@ __pycache__/
 venv/
 .venv/
 
+# scheduler runtime state
+.report_schedule_state.json
+
 # macOS
 .DS_Store
 

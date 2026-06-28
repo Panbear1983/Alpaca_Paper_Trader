@@ -14,6 +14,8 @@ Safety (two independent gates on every account-mutating action):
 Keys:
   r  refresh now            a  arm / disarm
   d  dry-run RS ranking     q  quit
+  p  push full report → Telegram (no arm needed)
+  g  toggle the scheduled auto-report on/off
   f  flatten ALL            t  live intraday tick
   c  live Capitol run       b  manual buy        s  sell selected row
   e  rebalance to top-N (sell the rest, redeploy cash)
@@ -43,6 +45,11 @@ import intraday_momentum as im
 import capitol_copier as cc
 import rebalance_top_n as rb
 
+try:
+    import telegram_notifier as tg
+except ImportError:
+    tg = None
+
 
 def _f(x, default=0.0):
     try:
@@ -54,7 +61,8 @@ def _f(x, default=0.0):
 # Key-hint line for the footer. Plain text with spaces so it wraps onto extra
 # lines when the terminal is narrow (the built-in Footer clips instead).
 KEY_HINTS = (
-    "[b]r[/b] refresh   [b]d[/b] dry-run   [b]a[/b] arm/disarm   [b]q[/b] quit"
+    "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]g[/b] sched   "
+    "[b]a[/b] arm/disarm   [b]q[/b] quit"
     "   •   "
     "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
     "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance"
@@ -178,6 +186,8 @@ class AlpacaTUI(App):
     BINDINGS = [
         Binding("r", "refresh", "Refresh"),
         Binding("d", "dryrun", "Dry-run RS"),
+        Binding("p", "push_report", "Push report"),
+        Binding("g", "toggle_schedule", "Auto-report on/off"),
         Binding("a", "arm", "Arm/Disarm"),
         Binding("f", "flatten", "Flatten ALL"),
         Binding("t", "tick", "Live tick"),
@@ -195,6 +205,8 @@ class AlpacaTUI(App):
         self._syms: list[str] = []   # holdings symbols in row order (for sell)
         self.market_open: bool | None = None   # None until first clock fetch
         self._next_open: str = "?"             # human-readable next-open time
+        self._tg_notify: bool = True           # send Telegram pings on actions
+        self._mkt_known: bool | None = None    # last market state (for transitions)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -208,13 +220,71 @@ class AlpacaTUI(App):
         t = self.query_one("#holdings", DataTable)
         t.add_columns("SYM", "QTY", "AVG", "PRICE", "P&L $", "P&L %")
         self.watch_armed(self.armed)
-        self._log("[dim]booted DISARMED — press 'a' to enable live actions[/]")
+        try:
+            self._tg_notify = im.load_config().get("tui", {}).get("telegram_notify", True)
+        except Exception:
+            self._tg_notify = True
+        tg_state = "on" if (self._tg_notify and tg is not None) else "off"
+        self._log(f"[dim]booted DISARMED — press 'a' to enable live actions "
+                  f"(Telegram alerts: {tg_state})[/]")
+        self._log(f"[dim]{self._schedule_status()} — press 'p' to push a report now, "
+                  f"'g' to toggle the schedule[/]")
         self.refresh_data()
         self.set_interval(8, self.refresh_data)
 
     # ── logging / arm ────────────────────────────────────────────────────────
     def _log(self, msg: str) -> None:
         self.query_one("#log", RichLog).write(msg)
+
+    def _notify(self, msg: str) -> None:
+        """Send a Telegram ping (plain text). No-op if disabled/unconfigured.
+        MUST be called from a worker thread — tg.send is a blocking network call."""
+        if tg is None or not self._tg_notify:
+            return
+        try:
+            tg.send(msg, parse_mode=None)
+        except Exception as e:
+            # Never let a notification failure disrupt trading
+            self.call_from_thread(self._log, f"[yellow]telegram notify failed: {e}[/]")
+
+    def _mkt_suffix(self) -> str:
+        """Clarify in notifications that orders queue when the market is closed."""
+        if self.market_open is False:
+            return f" — QUEUED to next open ({self._next_open})"
+        return ""
+
+    def _schedule_status(self) -> str:
+        try:
+            rs = im.load_config().get("report_schedule", {}) or {}
+        except Exception:
+            return "auto-report: ?"
+        if rs.get("enabled"):
+            scope = "weekdays" if rs.get("weekdays_only", True) else "daily"
+            return f"auto-report: ON @ {rs.get('time_et', '16:00')} ET ({scope})"
+        return "auto-report: OFF"
+
+    def action_toggle_schedule(self) -> None:
+        self._toggle_schedule()
+
+    @work(thread=True, group="config")
+    def _toggle_schedule(self) -> None:
+        import re
+        try:
+            with open(im.CONFIG_FILE) as f:
+                txt = f.read()
+            # Flip only report_schedule.enabled, preserving file formatting.
+            m = re.search(r'("report_schedule"\s*:\s*\{[^}]*?"enabled"\s*:\s*)(true|false)',
+                          txt, re.S)
+            if not m:
+                self.call_from_thread(self._log, "[red]schedule: report_schedule.enabled not found[/]")
+                return
+            new = "false" if m.group(2) == "true" else "true"
+            txt = txt[:m.start(2)] + new + txt[m.end(2):]
+            with open(im.CONFIG_FILE, "w") as f:
+                f.write(txt)
+            self.call_from_thread(self._log, f"[cyan]{self._schedule_status()}[/]")
+        except Exception as e:
+            self.call_from_thread(self._log, f"[red]schedule toggle error: {e}[/]")
 
     def action_arm(self) -> None:
         self.armed = not self.armed
@@ -266,6 +336,13 @@ class AlpacaTUI(App):
             self._next_open = dt.datetime.fromisoformat(nxt).strftime("%a %m-%d %H:%M ET")
         except ValueError:
             self._next_open = nxt or "?"
+        # Notify once on an open↔closed transition (skip the very first reading).
+        if self._mkt_known is not None and self._mkt_known != self.market_open:
+            note = ("📈 Market OPEN — TUI orders fill live."
+                    if self.market_open else
+                    f"🌙 Market CLOSED — TUI orders now queue to next open ({self._next_open}).")
+            self.run_worker(lambda: self._notify(note), thread=True, group="notify")
+        self._mkt_known = self.market_open
         if self.market_open:
             return "[b black on green] MARKET OPEN [/]"
         return f"[b black on yellow] MARKET CLOSED [/][yellow] orders queue → {self._next_open}[/]"
@@ -325,6 +402,25 @@ class AlpacaTUI(App):
             lines = [f"[red]dry-run error: {e}[/]"]
         self.call_from_thread(self._log, "\n".join(lines))
 
+    # ── push full report to Telegram (safe — no arm; sends a report, not a trade)
+    def action_push_report(self) -> None:
+        self._log("[cyan]building report → Telegram… (this can take ~20-30s)[/]")
+        self._do_push_report()
+
+    @work(thread=True, exclusive=True, group="report")
+    def _do_push_report(self) -> None:
+        try:
+            res = hr.run_report(
+                push=True,
+                log=lambda m: self.call_from_thread(self._log, f"[dim]{m}[/]"))
+            if res.get("sent"):
+                self.call_from_thread(self._log, "[green]✓ report pushed to Telegram[/]")
+                self._notify("📑 TUI pushed the full portfolio report")
+            else:
+                self.call_from_thread(self._log, "[yellow]report built but not sent[/]")
+        except Exception as e:
+            self.call_from_thread(self._log, f"[red]report error: {e}[/]")
+
     # ── account-mutating actions (arm + confirm) ───────────────────────────--
     def action_flatten(self) -> None:
         if not self._require_armed():
@@ -341,8 +437,10 @@ class AlpacaTUI(App):
             n = im.flatten(st, dry_run=False, reason="manual flatten (TUI)")
             im.save_state(st)
             self.call_from_thread(self._log, f"[red]FLATTEN sent — {n} positions[/]")
+            self._notify(f"🛑 TUI FLATTEN — submitted close on {n} positions{self._mkt_suffix()}")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]flatten error: {e}[/]")
+            self._notify(f"⚠️ TUI flatten error: {e}")
         self.call_from_thread(self.refresh_data)
 
     def action_tick(self) -> None:
@@ -358,8 +456,10 @@ class AlpacaTUI(App):
         try:
             im.run_tick(im.load_config(), dry_run=False)
             self.call_from_thread(self._log, "[cyan]intraday tick complete[/]")
+            self._notify(f"⚡ TUI intraday tick complete{self._mkt_suffix()}")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]tick error: {e}[/]")
+            self._notify(f"⚠️ TUI tick error: {e}")
         self.call_from_thread(self.refresh_data)
 
     def action_capitol(self) -> None:
@@ -375,8 +475,10 @@ class AlpacaTUI(App):
         try:
             cc.run(dry_run=False)
             self.call_from_thread(self._log, "[cyan]Capitol run complete[/]")
+            self._notify(f"🏛️ TUI Capitol Copier run complete{self._mkt_suffix()}")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]capitol error: {e}[/]")
+            self._notify(f"⚠️ TUI capitol error: {e}")
         self.call_from_thread(self.refresh_data)
 
     def action_buy(self) -> None:
@@ -420,8 +522,11 @@ class AlpacaTUI(App):
                 res = cc.place_market_order(sym, "sell", qty=qty)
             oid = res.get("id") or res.get("message") or "?"
             self.call_from_thread(self._log, f"[green]{side.upper()} {sym} sent → {str(oid)[:14]}[/]")
+            amt = f" ${notional:,.0f}" if (side == "buy" and notional) else ""
+            self._notify(f"🟢 TUI {side.upper()} {sym}{amt} — submitted{self._mkt_suffix()}")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]order error: {e}[/]")
+            self._notify(f"⚠️ TUI {side} {sym} error: {e}")
         self.call_from_thread(self.refresh_data)
 
     # ── rebalance to top-N (sell the rest, redeploy cash) ───────────────────--
@@ -461,8 +566,13 @@ class AlpacaTUI(App):
         try:
             rb.execute(sell, buys,
                        log=lambda m: self.call_from_thread(self._log, m))
+            # ONE batched notification, not one per order
+            self._notify(
+                f"♻️ TUI rebalance — submitted {len(sell)} sells + {len(buys)} buys"
+                f"{self._mkt_suffix()}")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]rebalance error: {e}[/]")
+            self._notify(f"⚠️ TUI rebalance error: {e}")
         self.call_from_thread(self.refresh_data)
 
 

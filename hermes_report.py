@@ -514,40 +514,87 @@ def _split_for_telegram(text: str, limit: int = 3900) -> list[str]:
     return chunks
 
 
-def tg_send_text(text: str) -> None:
-    if not (TG_TOKEN and TG_CHAT):
-        print("[tg] skip — TELEGRAM_BOT_TOKEN / TELEGRAM_HOME_CHANNEL not set",
-              file=sys.stderr)
-        return
-    parts = _split_for_telegram(text)
-    for i, part in enumerate(parts, 1):
-        r = requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={
-                "chat_id": TG_CHAT,
-                "text": part,
-                "parse_mode": "Markdown",
-                "disable_web_page_preview": True,
-            },
-            timeout=15,
-        )
-        if not r.ok:
-            print(f"[tg] text error (part {i}/{len(parts)}) {r.status_code}: {r.text}",
-                  file=sys.stderr)
+def tg_send_text(text: str, channel: str | None = None) -> None:
+    """Route the report text through the unified telegram_notifier layer
+    (named channels + one chat var), chunked to Telegram's size limit."""
+    import telegram_notifier as tn
+    for i, part in enumerate(_split_for_telegram(text), 1):
+        if not tn.send(part, parse_mode="Markdown", channel=channel):
+            print(f"[tg] text send failed (part {i})", file=sys.stderr)
 
 
-def tg_send_photo(path: Path, caption: str = "") -> None:
-    if not (TG_TOKEN and TG_CHAT):
-        return
-    with open(path, "rb") as fh:
-        r = requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
-            data={"chat_id": TG_CHAT, "caption": caption},
-            files={"photo": fh},
-            timeout=20,
-        )
-    if not r.ok:
-        print(f"[tg] photo error {r.status_code}: {r.text}", file=sys.stderr)
+def tg_send_photo(path: Path, caption: str = "", channel: str | None = None) -> None:
+    import telegram_notifier as tn
+    if not tn.send_photo(str(path), caption=caption, channel=channel):
+        print(f"[tg] photo send failed: {path}", file=sys.stderr)
+
+
+# ── report entrypoint (reusable by the TUI + scheduler) ───────────────────────
+def run_report(push: bool = True, channel: str | None = None, log=print) -> dict:
+    """Generate the full report (markdown + 2 charts + analyst take) and,
+    when `push`, send it to Telegram via the given channel. No argparse / no
+    gate — callable from the CLI, the TUI key, and the scheduler. Returns
+    {report, md_path, equity_png, alloc_png, sent}."""
+    stamp     = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    md_path   = REPORTS_DIR / f"alpaca_{stamp}.md"
+    eq_png    = REPORTS_DIR / f"alpaca_equity_{stamp}.png"
+    alloc_png = REPORTS_DIR / f"alpaca_alloc_{stamp}.png"
+
+    log("[1/5] Fetching account...")
+    acct = fetch_account()
+    log("[2/5] Fetching positions...")
+    positions = fetch_positions()
+    log("[3/5] Fetching today's buy orders...")
+    today_buys = fetch_orders_today_buys()
+    log("[4/5] Fetching history, quotes, SPY...")
+    history  = fetch_portfolio_history()
+    quotes   = fetch_quotes(WATCHLIST)
+    spy_pct  = fetch_spy_day_pct()
+    log("[5/5] Loading local state + building report...")
+    local = load_local_state()
+
+    report = build_report(acct, positions, today_buys, quotes, spy_pct, local)
+
+    # ── Analyst Take — grounded LLM summary via OpenRouter (optional) ──────
+    try:
+        import openrouter_analyst
+        summary = openrouter_analyst.summarize(report)
+        if summary and not summary.startswith("[analyst error"):
+            report += f"\n\n*Analyst Take*\n{summary}"
+            log(f"[analyst] summary added ({openrouter_analyst.MODEL})")
+        elif summary:  # error string — note it, don't break the report
+            report += "\n\n_Analyst summary unavailable this run._"
+            log(f"[analyst] {summary}")
+        else:
+            log("[analyst] no OPENROUTER_API_KEY set — skipping summary")
+    except Exception as e:
+        log(f"[analyst] skipped: {e}")
+
+    report += "\n\n_Alpaca Paper Trader · auto-report at NYSE close_"
+    md_path.write_text(report, encoding="utf-8")
+
+    eq_done    = chart_equity(history, eq_png)
+    alloc_done = chart_allocation(positions, alloc_png)
+    log(f"✓ Report: {md_path}")
+
+    sent = False
+    if push:
+        log("[tg] Sending report text...")
+        tg_send_text(report, channel=channel)
+        if eq_done:
+            log("[tg] Sending equity chart...")
+            tg_send_photo(eq_png, "Equity — last 30 days", channel=channel)
+        if alloc_done:
+            log("[tg] Sending allocation chart...")
+            tg_send_photo(alloc_png, "Allocation by market value", channel=channel)
+        sent = True
+        log("✓ Done.")
+    else:
+        log("(push disabled — Telegram skipped)")
+
+    return {"report": report, "md_path": md_path,
+            "equity_png": eq_png if eq_done else None,
+            "alloc_png": alloc_png if alloc_done else None, "sent": sent}
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -571,67 +618,10 @@ def main() -> int:
             return 0
         print(f"[gate] {et_now:%a %H:%M ET} — NYSE close, running report.")
 
-    stamp     = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    md_path   = REPORTS_DIR / f"alpaca_{stamp}.md"
-    eq_png    = REPORTS_DIR / f"alpaca_equity_{stamp}.png"
-    alloc_png = REPORTS_DIR / f"alpaca_alloc_{stamp}.png"
-
-    print("[1/5] Fetching account...",              flush=True)
-    acct = fetch_account()
-    print("[2/5] Fetching positions...",             flush=True)
-    positions = fetch_positions()
-    print("[3/5] Fetching today's buy orders...",   flush=True)
-    today_buys = fetch_orders_today_buys()
-    print("[4/5] Fetching history, quotes, SPY...", flush=True)
-    history  = fetch_portfolio_history()
-    quotes   = fetch_quotes(WATCHLIST)
-    spy_pct  = fetch_spy_day_pct()
-    print("[5/5] Loading local state + building report...", flush=True)
-    local = load_local_state()
-
-    report = build_report(acct, positions, today_buys, quotes, spy_pct, local)
-
-    # ── Analyst Take — grounded LLM summary via OpenRouter (optional) ──────
-    try:
-        import openrouter_analyst
-        summary = openrouter_analyst.summarize(report)
-        if summary and not summary.startswith("[analyst error"):
-            report += f"\n\n*Analyst Take*\n{summary}"
-            print(f"[analyst] summary added ({openrouter_analyst.MODEL})")
-        elif summary:  # error string — note it, don't break the report
-            report += "\n\n_Analyst summary unavailable this run._"
-            print(f"[analyst] {summary}")
-        else:
-            print("[analyst] no OPENROUTER_API_KEY set — skipping summary")
-    except Exception as e:
-        print(f"[analyst] skipped: {e}")
-
-    report += "\n\n_Alpaca Paper Trader · auto-report at NYSE close_"
-
-    md_path.write_text(report, encoding="utf-8")
-
-    eq_done    = chart_equity(history, eq_png)
-    alloc_done = chart_allocation(positions, alloc_png)
-
-    print(f"\n✓ Report:       {md_path}")
-    if eq_done:    print(f"✓ Equity chart: {eq_png}")
-    if alloc_done: print(f"✓ Alloc chart:  {alloc_png}")
-
+    result = run_report(push=not args.dry_run, log=lambda m: print(m, flush=True))
     if args.dry_run:
         print("\n--- DRY RUN (Telegram skipped) ---\n")
-        print(report)
-        return 0
-
-    print("\n[tg] Sending report text...")
-    tg_send_text(report)
-    if eq_done:
-        print("[tg] Sending equity chart...")
-        tg_send_photo(eq_png, "Equity — last 30 days")
-    if alloc_done:
-        print("[tg] Sending allocation chart...")
-        tg_send_photo(alloc_png, "Allocation by market value")
-
-    print("✓ Done.")
+        print(result["report"])
     return 0
 
 

@@ -78,5 +78,24 @@
     "trade_size_step_usd": 100,
     "stop_loss_step_pct": 0.01,
     "trailing_trigger_step_pct": 0.01
+  },
+
+  "tui": {
+    "telegram_notify": true
+  },
+
+  "telegram": {
+    "default_channel": "home",
+    "channels": {
+      "home": { "token_env": "TELEGRAM_BOT_TOKEN", "chat_env": "TELEGRAM_CHAT_ID" }
+    }
+  },
+
+  "report_schedule": {
+    "enabled": true,
+    "time_et": "16:00",
+    "window_minutes": 20,
+    "weekdays_only": true,
+    "channel": "home"
   }
 }

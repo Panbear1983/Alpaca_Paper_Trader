@@ -63,6 +63,8 @@ Data auto-refreshes every **8 seconds**.
 |-----|--------|:----------:|:--------------:|
 | `r` | Refresh now | — | — |
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
+| `p` | Push the full portfolio report to Telegram now | — | — |
+| `g` | Toggle the scheduled auto-report on/off | — | — |
 | `a` | Arm / Disarm toggle | — | — |
 | `q` | Quit | — | — |
 | `f` | **Flatten ALL** positions to cash | ✅ | ✅ |
