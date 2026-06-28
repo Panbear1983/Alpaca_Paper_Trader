@@ -2,7 +2,6 @@
   "version": 3,
   "last_updated": "2026-06-12",
   "updated_by": "aggressive_sector_concentrated_dynamic_pivot",
-
   "capitol_copier": {
     "trade_size_usd": 1000,
     "max_trade_size_usd": 3000,
@@ -11,10 +10,14 @@
     "dedup_window_days": 45,
     "legacy_politician_id": "K000389",
     "legacy_politician_name": "Ro Khanna",
-    "target_sectors": ["tech", "robotics", "energy", "industrial"],
+    "target_sectors": [
+      "tech",
+      "robotics",
+      "energy",
+      "industrial"
+    ],
     "sentiment_veto_enabled": false
   },
-
   "pool": {
     "max_size": 4,
     "min_size": 3,
@@ -29,49 +32,81 @@
     "revet_frequency": "monthly",
     "probation_weeks": 2,
     "max_weight_change_per_week": 0.15,
-    "auto_pause_win_rate": 0.30,
+    "auto_pause_win_rate": 0.3,
     "rank_weights": {
-      "1": 0.50,
-      "2": 0.30,
+      "1": 0.5,
+      "2": 0.3,
       "3": 0.13,
       "4": 0.07
     }
   },
-
   "dynamic_exits": {
     "enabled": true,
     "stop_loss_pct": 0.08,
     "trail_trigger_pct": 0.15,
     "trail_giveback_pct": 0.08,
-    "take_profit_levels": [[0.25, 0.33], [0.50, 0.50]],
-    "pyramid_levels": [0.10, 0.20],
-    "pyramid_add_frac": 0.50,
+    "take_profit_levels": [
+      [
+        0.25,
+        0.33
+      ],
+      [
+        0.5,
+        0.5
+      ]
+    ],
+    "pyramid_levels": [
+      0.1,
+      0.2
+    ],
+    "pyramid_add_frac": 0.5,
     "prune_off_target": true,
     "max_holdings": 10
   },
-
   "intraday": {
     "enabled": true,
-    "universe": ["NVDA","TSLA","AMD","META","AAPL","AVGO","MSFT","AMZN","GOOGL","NFLX",
-                 "SMCI","COIN","MU","QCOM","CRM","PLTR","MRVL","ARM","ASML","INTC",
-                 "ADBE","NOW","PANW","ANET","ORCL"],
+    "universe": [
+      "NVDA",
+      "TSLA",
+      "AMD",
+      "META",
+      "AAPL",
+      "AVGO",
+      "MSFT",
+      "AMZN",
+      "GOOGL",
+      "NFLX",
+      "SMCI",
+      "COIN",
+      "MU",
+      "QCOM",
+      "CRM",
+      "PLTR",
+      "MRVL",
+      "ARM",
+      "ASML",
+      "INTC",
+      "ADBE",
+      "NOW",
+      "PANW",
+      "ANET",
+      "ORCL"
+    ],
     "top_n": 6,
     "gross_mult": 4.0,
     "stop_pct": 0.03,
     "flatten_minutes": 12
   },
-
   "scoring_weights": {
-    "realized_return_alpha":   0.30,
-    "win_rate":                0.25,
-    "disclosure_speed":        0.15,
-    "sector_diversification":  0.10,
-    "activity_consistency":    0.10,
-    "sample_size_confidence":  0.10
+    "realized_return_alpha": 0.3,
+    "win_rate": 0.25,
+    "disclosure_speed": 0.15,
+    "sector_diversification": 0.1,
+    "activity_consistency": 0.1,
+    "sample_size_confidence": 0.1
   },
-
   "review": {
-    "min_win_rate_threshold": 0.40,
+    "min_win_rate_threshold": 0.4,
     "target_win_rate": 0.55,
     "min_profit_factor": 1.2,
     "min_sharpe": 0.5,
@@ -79,18 +114,18 @@
     "stop_loss_step_pct": 0.01,
     "trailing_trigger_step_pct": 0.01
   },
-
   "tui": {
     "telegram_notify": true
   },
-
   "telegram": {
     "default_channel": "home",
     "channels": {
-      "home": { "token_env": "TELEGRAM_BOT_TOKEN", "chat_env": "TELEGRAM_CHAT_ID" }
+      "home": {
+        "token_env": "TELEGRAM_BOT_TOKEN",
+        "chat_env": "TELEGRAM_CHAT_ID"
+      }
     }
   },
-
   "report_schedule": {
     "enabled": true,
     "time_et": "16:00",

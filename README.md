@@ -112,7 +112,8 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `r` | Refresh now | — | — |
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
 | `p` | **Push the full portfolio report** to Telegram now (same format as the daily report) | — | — |
-| `g` | Toggle the **scheduled** auto-report on/off (`report_schedule.enabled`) | — | — |
+| `g` | **Edit the scheduled** auto-report — opens a modal for on/off, time (HH:MM ET), weekdays-only, and channel | — | — |
+| `m` | **Edit Telegram channels** — set the default channel or add a channel (config only; chat-ID/token values stay in `.env`) | — | — |
 | `a` | Arm / Disarm toggle | — | — |
 | `q` | Quit | — | — |
 | `f` | **Flatten ALL** positions to cash | ✅ | ✅ |

@@ -15,7 +15,8 @@ Keys:
   r  refresh now            a  arm / disarm
   d  dry-run RS ranking     q  quit
   p  push full report → Telegram (no arm needed)
-  g  toggle the scheduled auto-report on/off
+  g  edit the scheduled auto-report (time / on-off / weekdays / channel)
+  m  edit Telegram channels (config only — values stay in .env)
   f  flatten ALL            t  live intraday tick
   c  live Capitol run       b  manual buy        s  sell selected row
   e  rebalance to top-N (sell the rest, redeploy cash)
@@ -28,6 +29,7 @@ capitol_copier.py — places no orders on import.
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from rich.text import Text
 from textual import work
@@ -44,6 +46,7 @@ import hermes_report as hr
 import intraday_momentum as im
 import capitol_copier as cc
 import rebalance_top_n as rb
+import config_io
 
 try:
     import telegram_notifier as tg
@@ -62,7 +65,7 @@ def _f(x, default=0.0):
 # lines when the terminal is narrow (the built-in Footer clips instead).
 KEY_HINTS = (
     "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]g[/b] sched   "
-    "[b]a[/b] arm/disarm   [b]q[/b] quit"
+    "[b]m[/b] channels   [b]a[/b] arm/disarm   [b]q[/b] quit"
     "   •   "
     "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
     "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance"
@@ -161,6 +164,130 @@ class RebalanceModal(ModalScreen[int | None]):
         self.dismiss(None)
 
 
+def _yn(s: str, default: bool = False) -> bool:
+    return str(s).strip().lower() in ("y", "yes", "true", "on", "1") if str(s).strip() else default
+
+
+_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+
+
+class ScheduleModal(ModalScreen[dict | None]):
+    """Edit report_schedule (enabled / time_et / weekdays_only / channel).
+    Returns the changed dict, or None on cancel."""
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, rs: dict, channels: list[str]):
+        super().__init__()
+        self._rs = rs or {}
+        self._channels = channels or ["home"]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Auto-report schedule", id="q")
+            yield Input(value="yes" if self._rs.get("enabled") else "no",
+                        id="enabled", placeholder="enabled? yes/no")
+            yield Input(value=str(self._rs.get("time_et", "16:00")),
+                        id="time", placeholder="time ET (HH:MM, 24h)")
+            yield Input(value="yes" if self._rs.get("weekdays_only", True) else "no",
+                        id="weekdays", placeholder="weekdays only? yes/no")
+            yield Input(value=str(self._rs.get("channel", self._channels[0])),
+                        id="channel", placeholder="channel: " + ", ".join(self._channels))
+            yield Label("", id="err")
+            with Horizontal(id="buttons"):
+                yield Button("Save", variant="error", id="ok")
+                yield Button("Cancel", variant="primary", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#time", Input).focus()
+
+    def _accept(self) -> None:
+        time_v = self.query_one("#time", Input).value.strip()
+        chan_v = self.query_one("#channel", Input).value.strip()
+        if not _TIME_RE.match(time_v):
+            self.query_one("#err", Label).update("[red]time must be HH:MM (24h)[/]")
+            return
+        if chan_v not in self._channels:
+            self.query_one("#err", Label).update(
+                f"[red]channel must be one of: {', '.join(self._channels)}[/]")
+            return
+        self.dismiss({
+            "enabled": _yn(self.query_one("#enabled", Input).value),
+            "time_et": time_v,
+            "weekdays_only": _yn(self.query_one("#weekdays", Input).value, True),
+            "channel": chan_v,
+        })
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._accept()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._accept()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ChannelModal(ModalScreen[dict | None]):
+    """Manage Telegram channels in config ONLY (never .env). Set the default
+    channel and/or add a new channel (name + env-var NAMES). Returns an action
+    dict {'kind': 'default'|'add', ...} or None on cancel."""
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, channels: dict, default: str):
+        super().__init__()
+        self._channels = channels or {}
+        self._default = default
+
+    def compose(self) -> ComposeResult:
+        names = ", ".join(self._channels) or "(none)"
+        with Vertical(id="dialog"):
+            yield Label(f"Telegram channels: {names}\n"
+                        f"default = {self._default}\n"
+                        "Values live in .env — this edits config only.", id="q")
+            yield Input(value=self._default, id="default",
+                        placeholder="set default channel (existing name)")
+            yield Input(id="newname", placeholder="add channel — name (optional)")
+            yield Input(id="tokenenv", placeholder="new channel TOKEN env-var name")
+            yield Input(id="chatenv", placeholder="new channel CHAT env-var name")
+            yield Label("", id="err")
+            with Horizontal(id="buttons"):
+                yield Button("Save", variant="error", id="ok")
+                yield Button("Cancel", variant="primary", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#default", Input).focus()
+
+    def _accept(self) -> None:
+        new_name = self.query_one("#newname", Input).value.strip()
+        if new_name:
+            te = self.query_one("#tokenenv", Input).value.strip()
+            ce = self.query_one("#chatenv", Input).value.strip()
+            if not (te and ce):
+                self.query_one("#err", Label).update(
+                    "[red]new channel needs both env-var names[/]")
+                return
+            self.dismiss({"kind": "add", "name": new_name, "token_env": te, "chat_env": ce})
+            return
+        dflt = self.query_one("#default", Input).value.strip()
+        if dflt and dflt not in self._channels:
+            self.query_one("#err", Label).update(
+                f"[red]'{dflt}' is not an existing channel[/]")
+            return
+        self.dismiss({"kind": "default", "name": dflt})
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._accept()
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 # ── Main app ─────────────────────────────────────────────────────────────────
 
 class AlpacaTUI(App):
@@ -187,7 +314,8 @@ class AlpacaTUI(App):
         Binding("r", "refresh", "Refresh"),
         Binding("d", "dryrun", "Dry-run RS"),
         Binding("p", "push_report", "Push report"),
-        Binding("g", "toggle_schedule", "Auto-report on/off"),
+        Binding("g", "edit_schedule", "Edit schedule"),
+        Binding("m", "edit_channels", "Channels"),
         Binding("a", "arm", "Arm/Disarm"),
         Binding("f", "flatten", "Flatten ALL"),
         Binding("t", "tick", "Live tick"),
@@ -227,8 +355,8 @@ class AlpacaTUI(App):
         tg_state = "on" if (self._tg_notify and tg is not None) else "off"
         self._log(f"[dim]booted DISARMED — press 'a' to enable live actions "
                   f"(Telegram alerts: {tg_state})[/]")
-        self._log(f"[dim]{self._schedule_status()} — press 'p' to push a report now, "
-                  f"'g' to toggle the schedule[/]")
+        self._log(f"[dim]{self._schedule_status()} — 'p' push report, 'g' edit schedule, "
+                  f"'m' channels[/]")
         self.refresh_data()
         self.set_interval(8, self.refresh_data)
 
@@ -263,28 +391,74 @@ class AlpacaTUI(App):
             return f"auto-report: ON @ {rs.get('time_et', '16:00')} ET ({scope})"
         return "auto-report: OFF"
 
-    def action_toggle_schedule(self) -> None:
-        self._toggle_schedule()
+    def _channels(self) -> dict:
+        try:
+            return (im.load_config().get("telegram", {}) or {}).get("channels", {}) or {}
+        except Exception:
+            return {}
+
+    # ── schedule editor (g) ───────────────────────────────────────────────────
+    def action_edit_schedule(self) -> None:
+        try:
+            cfg = im.load_config()
+        except Exception as e:
+            self._log(f"[red]config read error: {e}[/]")
+            return
+        rs = cfg.get("report_schedule", {}) or {}
+        names = list((cfg.get("telegram", {}) or {}).get("channels", {}).keys()) or ["home"]
+        self.push_screen(ScheduleModal(rs, names),
+                         lambda res: self._save_schedule(res) if res else None)
 
     @work(thread=True, group="config")
-    def _toggle_schedule(self) -> None:
-        import re
+    def _save_schedule(self, res: dict) -> None:
         try:
-            with open(im.CONFIG_FILE) as f:
-                txt = f.read()
-            # Flip only report_schedule.enabled, preserving file formatting.
-            m = re.search(r'("report_schedule"\s*:\s*\{[^}]*?"enabled"\s*:\s*)(true|false)',
-                          txt, re.S)
-            if not m:
-                self.call_from_thread(self._log, "[red]schedule: report_schedule.enabled not found[/]")
-                return
-            new = "false" if m.group(2) == "true" else "true"
-            txt = txt[:m.start(2)] + new + txt[m.end(2):]
-            with open(im.CONFIG_FILE, "w") as f:
-                f.write(txt)
-            self.call_from_thread(self._log, f"[cyan]{self._schedule_status()}[/]")
+            def mut(cfg):
+                cfg.setdefault("report_schedule", {}).update(res)
+                return cfg
+            new = config_io.update_config(mut)
+            rs = new.get("report_schedule", {})
+            warn = ""
+            if int(rs.get("window_minutes", 20)) < 10:
+                warn = "  [yellow]⚠ window_minutes < 10m heartbeat — report may be missed[/]"
+            self.call_from_thread(self._log, f"[cyan]{self._schedule_status()}[/]{warn}")
         except Exception as e:
-            self.call_from_thread(self._log, f"[red]schedule toggle error: {e}[/]")
+            self.call_from_thread(self._log, f"[red]schedule save error: {e}[/]")
+
+    # ── channel editor (m) — config only, never .env ─────────────────────────-
+    def action_edit_channels(self) -> None:
+        try:
+            cfg = im.load_config()
+        except Exception as e:
+            self._log(f"[red]config read error: {e}[/]")
+            return
+        tg_cfg = cfg.get("telegram", {}) or {}
+        self.push_screen(
+            ChannelModal(tg_cfg.get("channels", {}) or {}, tg_cfg.get("default_channel", "")),
+            lambda res: self._save_channels(res) if res else None)
+
+    @work(thread=True, group="config")
+    def _save_channels(self, res: dict) -> None:
+        try:
+            def mut(cfg):
+                tgc = cfg.setdefault("telegram", {})
+                tgc.setdefault("channels", {})
+                if res["kind"] == "add":
+                    tgc["channels"][res["name"]] = {
+                        "token_env": res["token_env"], "chat_env": res["chat_env"]}
+                    return cfg
+                if res.get("name"):
+                    tgc["default_channel"] = res["name"]
+                return cfg
+            config_io.update_config(mut)
+            if res["kind"] == "add":
+                self.call_from_thread(
+                    self._log,
+                    f"[cyan]channel '{res['name']}' added — set {res['token_env']} / "
+                    f"{res['chat_env']} in .env (restart TUI to use)[/]")
+            else:
+                self.call_from_thread(self._log, f"[cyan]default channel → {res.get('name')}[/]")
+        except Exception as e:
+            self.call_from_thread(self._log, f"[red]channel save error: {e}[/]")
 
     def action_arm(self) -> None:
         self.armed = not self.armed
