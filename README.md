@@ -100,7 +100,7 @@ python3 tui.py                  # needs a real terminal (full-screen app)
 1. **Header** — app title + live clock.
 2. **Summary line** — Equity, Cash, RegT (2x) & Daytrading (4x) buying power, Day P&L (green/red), Exposure (leverage).
 3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
-4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `S` sells.
+4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `s` sells.
 5. **Event log** — scrolling refreshes, dry-run output, order confirmations, errors.
 
 Data auto-refreshes every **8 seconds** (or `r` to force it).
@@ -113,15 +113,16 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
 | `a` | Arm / Disarm toggle | — | — |
 | `q` | Quit | — | — |
-| `F` | **Flatten ALL** positions to cash | ✅ | ✅ |
-| `T` | Live intraday momentum tick | ✅ | ✅ |
-| `C` | Live Capitol Copier cycle | ✅ | ✅ |
-| `B` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
-| `S` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
+| `f` | **Flatten ALL** positions to cash | ✅ | ✅ |
+| `t` | Live intraday momentum tick | ✅ | ✅ |
+| `c` | Live Capitol Copier cycle | ✅ | ✅ |
+| `b` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
+| `s` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
+| `e` | **Rebalance to top-N** — keep the best N by P&L %, sell the rest, redeploy cash (prompts for N) | ✅ | ✅ |
 
 ### Arm / Disarm safety
 
-The cockpit boots **DISARMED** (read-only). Every account-mutating key (`F` `T` `C` `B` `S`) passes **two** independent gates:
+The cockpit boots **DISARMED** (read-only). Every account-mutating key (`f` `t` `c` `b` `s`) passes **two** independent gates:
 
 1. **ARM switch** — order keys are inert until you press `a` (arm bar turns red). Pressing one while disarmed just logs `DISARMED — press 'a' first`.
 2. **Confirm modal** — even when armed, each action pops a Yes/No dialog showing exactly what it will do (`y`/Enter = Yes, `n`/Esc = No).

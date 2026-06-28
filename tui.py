@@ -14,8 +14,9 @@ Safety (two independent gates on every account-mutating action):
 Keys:
   r  refresh now            a  arm / disarm
   d  dry-run RS ranking     q  quit
-  F  flatten ALL            T  live intraday tick
-  C  live Capitol run       B  manual buy        S  sell selected row
+  f  flatten ALL            t  live intraday tick
+  c  live Capitol run       b  manual buy        s  sell selected row
+  e  rebalance to top-N (sell the rest, redeploy cash)
 
 Run (needs a real terminal):  python3 tui.py
 
@@ -40,6 +41,7 @@ from textual.widgets import (
 import hermes_report as hr
 import intraday_momentum as im
 import capitol_copier as cc
+import rebalance_top_n as rb
 
 
 def _f(x, default=0.0):
@@ -54,8 +56,8 @@ def _f(x, default=0.0):
 KEY_HINTS = (
     "[b]r[/b] refresh   [b]d[/b] dry-run   [b]a[/b] arm/disarm   [b]q[/b] quit"
     "   •   "
-    "[b]F[/b] flatten   [b]T[/b] tick   [b]C[/b] capitol   "
-    "[b]B[/b] buy   [b]S[/b] sell"
+    "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
+    "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance"
 )
 
 
@@ -115,6 +117,42 @@ class BuyModal(ModalScreen[tuple | None]):
         self.dismiss(None)
 
 
+class RebalanceModal(ModalScreen[int | None]):
+    """Ask how many top performers to keep. Returns the count, or None on cancel."""
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Rebalance — keep the top how many (by P&L %)?\n"
+                        "Sells the rest, redeploys cash into the kept names.", id="q")
+            yield Input(value="20", id="topn")
+            with Horizontal(id="buttons"):
+                yield Button("Build plan", variant="error", id="ok")
+                yield Button("Cancel", variant="primary", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#topn", Input).focus()
+
+    def _accept(self) -> None:
+        try:
+            n = int(self.query_one("#topn", Input).value.strip())
+        except ValueError:
+            n = 0
+        self.dismiss(n if n > 0 else None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._accept()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._accept()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 # ── Main app ─────────────────────────────────────────────────────────────────
 
 class AlpacaTUI(App):
@@ -141,11 +179,12 @@ class AlpacaTUI(App):
         Binding("r", "refresh", "Refresh"),
         Binding("d", "dryrun", "Dry-run RS"),
         Binding("a", "arm", "Arm/Disarm"),
-        Binding("F", "flatten", "Flatten ALL"),
-        Binding("T", "tick", "Live tick"),
-        Binding("C", "capitol", "Capitol run"),
-        Binding("B", "buy", "Buy"),
-        Binding("S", "sell", "Sell row"),
+        Binding("f", "flatten", "Flatten ALL"),
+        Binding("t", "tick", "Live tick"),
+        Binding("c", "capitol", "Capitol run"),
+        Binding("b", "buy", "Buy"),
+        Binding("s", "sell", "Sell row"),
+        Binding("e", "rebalance", "Rebalance top-N"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -357,6 +396,47 @@ class AlpacaTUI(App):
             self.call_from_thread(self._log, f"[green]{side.upper()} {sym} sent → {str(oid)[:14]}[/]")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]order error: {e}[/]")
+        self.call_from_thread(self.refresh_data)
+
+    # ── rebalance to top-N (sell the rest, redeploy cash) ───────────────────--
+    def action_rebalance(self) -> None:
+        if not self._require_armed():
+            return
+        self.push_screen(
+            RebalanceModal(),
+            lambda n: self._plan_rebalance(n) if n else None,
+        )
+
+    @work(thread=True, group="action")
+    def _plan_rebalance(self, n: int) -> None:
+        try:
+            positions = cc.get_positions()
+            longs = [p for p in positions if _f(p.get("qty")) > 0]
+            if len(longs) <= n:
+                self.call_from_thread(
+                    self._log,
+                    f"[yellow]only {len(longs)} long positions — nothing to trim at top {n}[/]")
+                return
+            keep, sell, buys, freed, skipped = rb.build_plan(positions, n, "plpc", 0.10)
+        except Exception as e:
+            self.call_from_thread(self._log, f"[red]rebalance plan error: {e}[/]")
+            return
+        summary = (f"Rebalance: SELL {len(sell)}, "
+                   f"redeploy ${freed:,.0f} into top {len(buys)} (by P&L %)?")
+        self.call_from_thread(self._log, f"[cyan]{summary}[/]")
+        self.call_from_thread(
+            self.push_screen,
+            ConfirmModal(summary),
+            lambda ok: self._exec_rebalance(sell, buys) if ok else None,
+        )
+
+    @work(thread=True, group="action")
+    def _exec_rebalance(self, sell: list, buys: list) -> None:
+        try:
+            rb.execute(sell, buys,
+                       log=lambda m: self.call_from_thread(self._log, m))
+        except Exception as e:
+            self.call_from_thread(self._log, f"[red]rebalance error: {e}[/]")
         self.call_from_thread(self.refresh_data)
 
 

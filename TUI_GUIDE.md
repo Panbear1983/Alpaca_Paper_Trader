@@ -33,7 +33,7 @@ Needs a real terminal (full-screen app). Reads creds from `.env`.
 │ booted DISARMED — press 'a' to enable live actions           │  ← Event log (last ~12 lines)
 │ refreshed 7 positions @ 14:23:01                             │
 ├──────────────────────────────────────────────────────────────┤
-│ r Refresh  d Dry-run RS  a Arm/Disarm  F Flatten  ...        │  ← Footer (key hints)
+│ r refresh  d dry-run  a arm/disarm  q quit • f flatten ...   │  ← Footer (wraps when narrow)
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,7 +49,7 @@ Five regions:
 4. **Holdings table** — one row per position, sorted by unrealized P&L
    (winners on top). Columns: SYM, QTY, AVG entry, current PRICE, P&L $, P&L %.
    P&L cells are green/red. **Move the row cursor with ↑/↓** — the selected row
-   is what `S` (sell) acts on.
+   is what `s` (sell) acts on.
 5. **Event log** — scrolling status: refreshes, dry-run output, order
    confirmations, and errors.
 
@@ -63,11 +63,12 @@ Data auto-refreshes every **8 seconds**.
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
 | `a` | Arm / Disarm toggle | — | — |
 | `q` | Quit | — | — |
-| `F` | **Flatten ALL** positions to cash | ✅ | ✅ |
-| `T` | Live intraday momentum tick | ✅ | ✅ |
-| `C` | Live Capitol Copier cycle | ✅ | ✅ |
-| `B` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
-| `S` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
+| `f` | **Flatten ALL** positions to cash | ✅ | ✅ |
+| `t` | Live intraday momentum tick | ✅ | ✅ |
+| `c` | Live Capitol Copier cycle | ✅ | ✅ |
+| `b` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
+| `s` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
+| `e` | **Rebalance to top-N** — keep best N by P&L %, sell the rest, redeploy cash | ✅ | ✅ |
 
 ## Two safety gates on every order
 
@@ -79,7 +80,7 @@ Every account-mutating action (F, T, C, B, S) passes **two** independent gates:
 2. **Confirm modal** — even when armed, each action pops a Yes/No dialog showing
    exactly what it will do. `y`/Enter = Yes, `n`/Esc = No.
 
-The Buy flow has an extra step: `B` first opens a form (symbol + notional USD),
+The Buy flow has an extra step: `b` first opens a form (symbol + notional USD),
 *then* shows the confirm modal.
 
 ## Typical session

@@ -104,23 +104,25 @@ def print_plan(keep, sell, buys, freed, skipped, by):
         print("  (short positions are not handled — close them manually if needed)")
 
 
-def execute(sell, buys):
-    print("\nExecuting SELLs…")
+def execute(sell, buys, log=print):
+    """Place the sells then the buys. `log` lets callers (e.g. the TUI) capture
+    output instead of printing to stdout."""
+    log("Executing SELLs…")
     for p in sell:
         qty = abs(_f(p.get("qty")))
         res = cc.place_market_order(p["symbol"], "sell", qty=qty)
         oid = res.get("id") or res.get("message") or res
-        print(f"  SELL {p['symbol']:<6} qty {qty:g}  →  {str(oid)[:18]}")
+        log(f"  SELL {p['symbol']:<6} qty {qty:g}  →  {str(oid)[:18]}")
 
-    print("\nExecuting BUYs…")
+    log("Executing BUYs…")
     for b in buys:
         if b["notional"] < 1:
-            print(f"  skip {b['symbol']} (allocation < $1)")
+            log(f"  skip {b['symbol']} (allocation < $1)")
             continue
         res = cc.place_market_order(b["symbol"], "buy", notional=b["notional"])
         oid = res.get("id") or res.get("message") or res
-        print(f"  BUY  {b['symbol']:<6} ${b['notional']:>9,.2f}  →  {str(oid)[:18]}")
-    print("\nDone. Re-check positions in the TUI (press 'r').")
+        log(f"  BUY  {b['symbol']:<6} ${b['notional']:>9,.2f}  →  {str(oid)[:18]}")
+    log("Done. Positions will refresh shortly.")
 
 
 def main():
