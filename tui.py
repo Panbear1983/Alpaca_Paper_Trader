@@ -128,15 +128,18 @@ class BuyModal(ModalScreen[tuple | None]):
         self.dismiss(None)
 
 
-class RebalanceModal(ModalScreen[int | None]):
-    """Ask how many top performers to keep. Returns the count, or None on cancel."""
+class RebalanceModal(ModalScreen[dict | None]):
+    """Ask how many top performers to keep, and optionally how much idle cash to
+    deploy. Returns {'n': int, 'deploy': str} or None on cancel."""
     BINDINGS = [("escape", "cancel", "Cancel")]
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label("Rebalance — keep the top how many (by P&L %)?\n"
-                        "Sells the rest, redeploys cash into the kept names.", id="q")
-            yield Input(value="20", id="topn")
+                        "Sells the rest, redeploys proceeds into the kept names.\n"
+                        "Deploy idle cash: 0 = none, a $ amount, or 'all' (to ~1x).", id="q")
+            yield Input(value="20", id="topn", placeholder="keep top N")
+            yield Input(value="0", id="deploy", placeholder="deploy idle cash: 0 / amount / all")
             with Horizontal(id="buttons"):
                 yield Button("Build plan", variant="error", id="ok")
                 yield Button("Cancel", variant="primary", id="cancel")
@@ -149,7 +152,8 @@ class RebalanceModal(ModalScreen[int | None]):
             n = int(self.query_one("#topn", Input).value.strip())
         except ValueError:
             n = 0
-        self.dismiss(n if n > 0 else None)
+        deploy = self.query_one("#deploy", Input).value.strip().lower() or "0"
+        self.dismiss({"n": n, "deploy": deploy} if n > 0 else None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "ok":
@@ -709,25 +713,41 @@ class AlpacaTUI(App):
             return
         self.push_screen(
             RebalanceModal(),
-            lambda n: self._plan_rebalance(n) if n else None,
+            lambda res: self._plan_rebalance(res) if res else None,
         )
 
     @work(thread=True, group="action")
-    def _plan_rebalance(self, n: int) -> None:
+    def _plan_rebalance(self, res: dict) -> None:
+        n = res["n"]
         try:
             positions = cc.get_positions()
             longs = [p for p in positions if _f(p.get("qty")) > 0]
-            if len(longs) <= n:
+            # Resolve idle cash to deploy (1x cap — never borrow here).
+            req = res.get("deploy", "0")
+            avail = rb.available_cash()
+            if req == "all":
+                deploy = avail
+            else:
+                deploy = max(0.0, _f(req))
+                if deploy > avail:
+                    self.call_from_thread(
+                        self._log,
+                        f"[yellow]deploy ${deploy:,.0f} > cash ${avail:,.0f} — capping (no leverage)[/]")
+                    deploy = avail
+            if len(longs) <= n and deploy <= 0:
                 self.call_from_thread(
                     self._log,
-                    f"[yellow]only {len(longs)} long positions — nothing to trim at top {n}[/]")
+                    f"[yellow]only {len(longs)} long positions at top {n} and no cash to deploy[/]")
                 return
-            keep, sell, buys, freed, skipped = rb.build_plan(positions, n, "plpc", 0.10)
+            keep, sell, buys, freed, skipped = rb.build_plan(
+                positions, n, "plpc", 0.10, deploy_cash=deploy)
         except Exception as e:
             self.call_from_thread(self._log, f"[red]rebalance plan error: {e}[/]")
             return
-        summary = (f"Rebalance: SELL {len(sell)}, "
-                   f"redeploy ${freed:,.0f} into top {len(buys)} (by P&L %)?")
+        cash_bit = f" + ${deploy:,.0f} idle cash" if deploy > 0 else ""
+        summary = (f"Rebalance: SELL {len(sell)}, deploy "
+                   f"${freed + deploy:,.0f} (${freed:,.0f} proceeds{cash_bit}) "
+                   f"into top {len(buys)}?")
         self.call_from_thread(self._log, f"[cyan]{summary}[/]")
         self.call_from_thread(
             self.push_screen,

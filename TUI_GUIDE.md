@@ -73,7 +73,7 @@ Data auto-refreshes every **8 seconds**.
 | `c` | Live Capitol Copier cycle | ✅ | ✅ |
 | `b` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
 | `s` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
-| `e` | **Rebalance to top-N** — keep best N by P&L %, sell the rest, redeploy cash | ✅ | ✅ |
+| `e` | **Rebalance to top-N** — keep best N by P&L %, sell the rest, redeploy proceeds; optionally deploy idle cash ($ amount or `all`, ~1x) | ✅ | ✅ |
 
 ## Two safety gates on every order
 

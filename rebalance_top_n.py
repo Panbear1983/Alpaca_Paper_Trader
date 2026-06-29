@@ -63,15 +63,29 @@ def performance_weights(keep: list[dict], floor_frac: float) -> dict[str, float]
     return {s: w / total for s, w in raw.items()}
 
 
-def build_plan(positions, top_n, by, floor_frac):
+def available_cash() -> float:
+    """Idle (uninvested) cash on the account, for deploy-to-1x."""
+    import requests
+    try:
+        r = requests.get(f"{cc.BASE_URL}/account", headers=cc.ALPACA_HEADERS, timeout=15)
+        return float(r.json().get("cash", 0)) if r.status_code == 200 else 0.0
+    except Exception:
+        return 0.0
+
+
+def build_plan(positions, top_n, by, floor_frac, deploy_cash=0.0):
+    """Sell everything outside the top-N and redeploy the proceeds PLUS any
+    `deploy_cash` (idle cash to put to work) into the kept names, weighted by
+    performance. deploy_cash=0 reproduces the original recycle-only behavior."""
     longs = [p for p in positions if _f(p.get("qty")) > 0]
     skipped = [p for p in positions if _f(p.get("qty")) <= 0]  # shorts: not handled
     ranked = rank_positions(longs, by)
     keep, sell = ranked[:top_n], ranked[top_n:]
     freed = sum(_f(p.get("market_value")) for p in sell)
+    pool = freed + max(0.0, _f(deploy_cash))          # proceeds + idle cash
     weights = performance_weights(keep, floor_frac) if keep else {}
     buys = [
-        {"symbol": p["symbol"], "notional": freed * weights[p["symbol"]],
+        {"symbol": p["symbol"], "notional": pool * weights[p["symbol"]],
          "plpc": _f(p.get("unrealized_plpc")) * 100}
         for p in keep
     ]
@@ -82,10 +96,13 @@ def fmt_pct(x):  # x already a fraction
     return f"{x * 100:+.1f}%"
 
 
-def print_plan(keep, sell, buys, freed, skipped, by):
+def print_plan(keep, sell, buys, freed, skipped, by, deploy_cash=0.0):
     print(f"\n{'='*64}\nREBALANCE PLAN  (rank by {by})\n{'='*64}")
 
     print(f"\nSELL {len(sell)} positions  →  frees ~${freed:,.2f} cash")
+    if deploy_cash > 0:
+        print(f"DEPLOY idle cash  →  +${deploy_cash:,.2f}  "
+              f"(total to invest: ${freed + deploy_cash:,.2f})")
     print(f"  {'SYM':<6} {'QTY':>10} {'MKT VAL':>12} {'P&L %':>9}")
     for p in sell:
         print(f"  {p['symbol']:<6} {_f(p.get('qty')):>10g} "
@@ -132,6 +149,10 @@ def main():
                     help="ranking metric: plpc=P&L%% (default), pl=P&L$, mv=size")
     ap.add_argument("--floor", type=float, default=0.10,
                     help="min weight floor as fraction of P&L spread (default 0.10)")
+    ap.add_argument("--deploy-cash", type=float, default=0.0,
+                    help="also deploy this much idle cash into the kept names")
+    ap.add_argument("--deploy-all", action="store_true",
+                    help="deploy ALL available idle cash (to ~1x, no leverage)")
     ap.add_argument("--live", action="store_true",
                     help="actually place orders (otherwise dry-run)")
     args = ap.parse_args()
@@ -140,20 +161,33 @@ def main():
     if not positions:
         print("No open positions (or fetch failed). Check ALPACA creds / endpoint.")
         sys.exit(1)
-    if len([p for p in positions if _f(p.get("qty")) > 0]) <= args.top:
-        print(f"Only {len(positions)} long positions — nothing to trim at top={args.top}.")
+
+    # Resolve idle cash to deploy, capped at what's actually available (1x — no
+    # leverage; borrowing beyond cash is a separate, gated mode).
+    deploy = available_cash() if args.deploy_all else max(0.0, args.deploy_cash)
+    if deploy > 0:
+        avail = available_cash()
+        if deploy > avail:
+            print(f"⚠ requested ${deploy:,.2f} > available cash ${avail:,.2f} — "
+                  f"capping at cash (no leverage). Use the leveraged mode for >1x.")
+            deploy = avail
+
+    n_long = len([p for p in positions if _f(p.get("qty")) > 0])
+    if n_long <= args.top and deploy <= 0:
+        print(f"Only {n_long} long positions — nothing to trim at top={args.top} "
+              f"(and no cash to deploy).")
         sys.exit(0)
 
     keep, sell, buys, freed, skipped = build_plan(
-        positions, args.top, args.by, args.floor)
-    print_plan(keep, sell, buys, freed, skipped, args.by)
+        positions, args.top, args.by, args.floor, deploy_cash=deploy)
+    print_plan(keep, sell, buys, freed, skipped, args.by, deploy_cash=deploy)
 
     if not args.live:
         print("\n[DRY-RUN] No orders placed. Re-run with --live to execute.")
         return
 
-    print(f"\n⚠ LIVE MODE — this will sell {len(sell)} and buy into {len(buys)} "
-          f"on {cc.BASE_URL}")
+    print(f"\n⚠ LIVE MODE — sell {len(sell)}, buy into {len(buys)} "
+          f"(${freed + deploy:,.0f} total) on {cc.BASE_URL}")
     if input("Type EXECUTE to proceed: ").strip() != "EXECUTE":
         print("Aborted — nothing placed.")
         return
