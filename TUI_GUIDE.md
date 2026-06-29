@@ -71,8 +71,8 @@ Data auto-refreshes every **8 seconds**.
 | `f` | **Flatten ALL** positions to cash | ✅ | ✅ |
 | `t` | Live intraday momentum tick | ✅ | ✅ |
 | `c` | Live Capitol Copier cycle | ✅ | ✅ |
-| `b` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
-| `s` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
+| `b` | Manual **Buy** (symbol + notional $) — live "cash after" readout | ✅ | ✅ |
+| `s` | **Sell** cursor row — `all` or a $ amount (partial); live "cash after / position left" | ✅ | ✅ |
 | `e` | **Rebalance to top-N** — keep best N, sell the rest; then pick ONE: deploy idle cash (buy) or withdraw/raise cash (trim), each with a live readout | ✅ | ✅ |
 
 ## Two safety gates on every order

@@ -100,20 +100,42 @@ class ConfirmModal(ModalScreen[bool]):
 
 
 class BuyModal(ModalScreen[tuple | None]):
-    """Collect (symbol, notional_usd) for a manual buy. Returns None on cancel."""
+    """Collect (symbol, notional_usd) for a manual buy, with a live 'cash after'
+    readout as you type. Returns (sym, amt) or None on cancel."""
     BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, avail_cash: float = 0.0):
+        super().__init__()
+        self._avail = max(0.0, _f(avail_cash))
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label("Manual BUY — symbol + notional USD", id="q")
             yield Input(placeholder="Symbol e.g. NVDA", id="sym")
+            yield Label(f"Cash available: [b]${self._avail:,.2f}[/]", id="avail")
             yield Input(placeholder="Notional USD e.g. 1000", id="amt")
+            yield Label("", id="after")
             with Horizontal(id="buttons"):
                 yield Button("Buy", variant="error", id="ok")
                 yield Button("Cancel", variant="primary", id="cancel")
 
     def on_mount(self) -> None:
+        self._update_after()
         self.query_one("#sym", Input).focus()
+
+    def _update_after(self) -> None:
+        amt = _amt_of(self.query_one("#amt", Input).value, self._avail)
+        after = self._avail - amt
+        lbl = self.query_one("#after", Label)
+        if after < 0:
+            lbl.update(f"buy [b]${amt:,.2f}[/] → cash [b]$0.00[/] "
+                       f"[yellow](+${-after:,.2f} on margin/buying power)[/]")
+        else:
+            lbl.update(f"buy [b]${amt:,.2f}[/] → cash after [b]${after:,.2f}[/]")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "amt":
+            self._update_after()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "ok":
@@ -123,6 +145,59 @@ class BuyModal(ModalScreen[tuple | None]):
                 self.dismiss((sym, amt))
                 return
         self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class SellModal(ModalScreen[str | None]):
+    """Collect a sell amount for ONE position: 'all' (full exit) or a $ amount
+    (partial). Live 'cash after' + remaining-position readout. Returns the amount
+    string, or None on cancel."""
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, symbol: str, position_value: float, cash: float):
+        super().__init__()
+        self._sym = symbol
+        self._pv = max(0.0, _f(position_value))
+        self._cash = max(0.0, _f(cash))
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(f"SELL {self._sym} — amount", id="q")
+            yield Label(f"Position value: [b]${self._pv:,.2f}[/]   "
+                        f"Cash now: [b]${self._cash:,.2f}[/]", id="avail")
+            yield Input(value="all", id="amt", placeholder="all / $ amount")
+            yield Label("", id="after")
+            with Horizontal(id="buttons"):
+                yield Button("Sell", variant="error", id="ok")
+                yield Button("Cancel", variant="primary", id="cancel")
+
+    def on_mount(self) -> None:
+        self._update_after()
+        self.query_one("#amt", Input).focus()
+
+    def _update_after(self) -> None:
+        amt = min(_amt_of(self.query_one("#amt", Input).value, self._pv), self._pv)
+        self.query_one("#after", Label).update(
+            f"sell [b]${amt:,.2f}[/] → cash after [b]${self._cash + amt:,.2f}[/], "
+            f"position left [b]${self._pv - amt:,.2f}[/]")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "amt":
+            self._update_after()
+
+    def _accept(self) -> None:
+        self.dismiss(self.query_one("#amt", Input).value.strip().lower() or "all")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._accept()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._accept()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -398,6 +473,7 @@ class AlpacaTUI(App):
         self._mkt_known: bool | None = None    # last market state (for transitions)
         self._cash: float = 0.0                # idle cash from last refresh
         self._lmv: float = 0.0                 # long market value (invested) from last refresh
+        self._mv: dict[str, float] = {}        # per-symbol market value from last refresh
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -608,6 +684,7 @@ class AlpacaTUI(App):
         t = self.query_one("#holdings", DataTable)
         t.clear()
         self._syms = []
+        self._mv = {}
         for p in sorted(positions, key=lambda x: _f(x.get("unrealized_pl")), reverse=True):
             sym  = p.get("symbol", "?")
             qty  = _f(p.get("qty"))
@@ -622,6 +699,7 @@ class AlpacaTUI(App):
                 key=sym,
             )
             self._syms.append(sym)
+            self._mv[sym] = _f(p.get("market_value"))
         self._log(f"[dim]refreshed {len(positions)} positions @ {dt.datetime.now():%H:%M:%S}[/]")
 
     # ── read-only dry-run ──────────────────────────────────────────────────--
@@ -731,7 +809,7 @@ class AlpacaTUI(App):
                 ConfirmModal(f"BUY {sym}  ${amt:,.0f}?"),
                 lambda ok: self._do_order(sym, "buy", amt) if ok else None,
             )
-        self.push_screen(BuyModal(), after_modal)
+        self.push_screen(BuyModal(self._cash), after_modal)
 
     def action_sell(self) -> None:
         if not self._require_armed():
@@ -742,17 +820,35 @@ class AlpacaTUI(App):
             self._log("[yellow]no position selected[/]")
             return
         sym = self._syms[row]
-        self.push_screen(
-            ConfirmModal(f"SELL ALL of {sym}?"),
-            lambda ok: self._do_order(sym, "sell") if ok else None,
-        )
+        pv = self._mv.get(sym, 0.0)
+
+        def after_modal(amt):
+            if not amt:
+                return
+            if amt in ("all", "max"):
+                self.push_screen(
+                    ConfirmModal(f"SELL ALL of {sym}?"),
+                    lambda ok: self._do_order(sym, "sell") if ok else None,
+                )
+            else:
+                d = min(_amt_of(amt, pv), pv)
+                if d <= 0:
+                    self._log("[yellow]nothing to sell (amount 0)[/]")
+                    return
+                self.push_screen(
+                    ConfirmModal(f"SELL ${d:,.0f} of {sym}?"),
+                    lambda ok: self._do_order(sym, "sell", d) if ok else None,
+                )
+        self.push_screen(SellModal(sym, pv, self._cash), after_modal)
 
     @work(thread=True, group="action")
     def _do_order(self, sym: str, side: str, notional: float | None = None) -> None:
         try:
             if side == "buy":
                 res = cc.place_market_order(sym, "buy", notional=notional)
-            else:
+            elif notional:                       # partial sell by dollar amount
+                res = cc.place_market_order(sym, "sell", notional=notional)
+            else:                                # full-position exit
                 pos = cc.get_position(sym)
                 qty = abs(_f(pos.get("qty"))) if pos else 0.0
                 if qty <= 0:
@@ -761,7 +857,7 @@ class AlpacaTUI(App):
                 res = cc.place_market_order(sym, "sell", qty=qty)
             oid = res.get("id") or res.get("message") or "?"
             self.call_from_thread(self._log, f"[green]{side.upper()} {sym} sent → {str(oid)[:14]}[/]")
-            amt = f" ${notional:,.0f}" if (side == "buy" and notional) else ""
+            amt = f" ${notional:,.0f}" if notional else ""
             self._notify(f"🟢 TUI {side.upper()} {sym}{amt} — submitted{self._mkt_suffix()}")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]order error: {e}[/]")
