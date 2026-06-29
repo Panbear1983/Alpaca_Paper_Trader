@@ -130,8 +130,13 @@ class BuyModal(ModalScreen[tuple | None]):
 
 class RebalanceModal(ModalScreen[dict | None]):
     """Ask how many top performers to keep, and optionally how much idle cash to
-    deploy. Returns {'n': int, 'deploy': str} or None on cancel."""
+    deploy. Shows available cash and a live 'leftover' figure as you type.
+    Returns {'n': int, 'deploy': str} or None on cancel."""
     BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, avail_cash: float = 0.0):
+        super().__init__()
+        self._avail = max(0.0, _f(avail_cash))
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
@@ -139,13 +144,37 @@ class RebalanceModal(ModalScreen[dict | None]):
                         "Sells the rest, redeploys proceeds into the kept names.\n"
                         "Deploy idle cash: 0 = none, a $ amount, or 'all' (to ~1x).", id="q")
             yield Input(value="20", id="topn", placeholder="keep top N")
+            yield Label(f"Available idle cash: [b]${self._avail:,.2f}[/]", id="avail")
             yield Input(value="0", id="deploy", placeholder="deploy idle cash: 0 / amount / all")
+            yield Label("", id="leftover")
             with Horizontal(id="buttons"):
                 yield Button("Build plan", variant="error", id="ok")
                 yield Button("Cancel", variant="primary", id="cancel")
 
     def on_mount(self) -> None:
+        self._update_leftover()
         self.query_one("#topn", Input).focus()
+
+    def _update_leftover(self) -> None:
+        v = self.query_one("#deploy", Input).value.strip().lower()
+        if v in ("all", "max"):
+            amt = self._avail
+        else:
+            try:
+                amt = max(0.0, float(v.replace(",", "").replace("$", "")))
+            except ValueError:
+                amt = 0.0
+        left = self._avail - amt
+        lbl = self.query_one("#leftover", Label)
+        if left < 0:
+            lbl.update(f"[yellow]deploy ${amt:,.2f} → exceeds cash by ${-left:,.2f} "
+                       f"(will cap at ${self._avail:,.2f}; no leverage)[/]")
+        else:
+            lbl.update(f"deploy [b]${amt:,.2f}[/] → leftover [b]${left:,.2f}[/]")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "deploy":
+            self._update_leftover()
 
     def _accept(self) -> None:
         try:
@@ -339,6 +368,7 @@ class AlpacaTUI(App):
         self._next_open: str = "?"             # human-readable next-open time
         self._tg_notify: bool = True           # send Telegram pings on actions
         self._mkt_known: bool | None = None    # last market state (for transitions)
+        self._cash: float = 0.0                # idle cash from last refresh
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -528,6 +558,7 @@ class AlpacaTUI(App):
     def _apply(self, acct: dict, positions: list[dict], clk: dict | None = None) -> None:
         equity = _f(acct.get("equity"))
         cash   = _f(acct.get("cash"))
+        self._cash = cash
         last   = _f(acct.get("last_equity"), equity)
         rt     = _f(acct.get("regt_buying_power"))
         dtbp   = _f(acct.get("daytrading_buying_power"))
@@ -712,7 +743,7 @@ class AlpacaTUI(App):
         if not self._require_armed():
             return
         self.push_screen(
-            RebalanceModal(),
+            RebalanceModal(self._cash),
             lambda res: self._plan_rebalance(res) if res else None,
         )
 
