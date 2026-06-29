@@ -121,7 +121,7 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `c` | Live Capitol Copier cycle | ✅ | ✅ |
 | `b` | Manual **Buy** (prompts symbol + notional $) | ✅ | ✅ |
 | `s` | **Sell ALL** of the cursor-selected row | ✅ | ✅ |
-| `e` | **Rebalance to top-N** — keep the best N by P&L %, sell the rest, redeploy proceeds; optionally **deploy idle cash** too (enter a $ amount or `all` for ~1x, no leverage) | ✅ | ✅ |
+| `e` | **Rebalance to top-N** — keep the best N by P&L %, sell the rest, redeploy proceeds; then pick ONE: **deploy idle cash** (buy, ~1x) or **withdraw / raise cash** (trim holdings to a $ target). Each field takes a $ amount or `all`, with a live readout | ✅ | ✅ |
 
 ### Arm / Disarm safety
 

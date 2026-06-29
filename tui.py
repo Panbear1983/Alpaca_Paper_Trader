@@ -128,53 +128,74 @@ class BuyModal(ModalScreen[tuple | None]):
         self.dismiss(None)
 
 
+def _amt_of(s: str, base: float) -> float:
+    """Parse a deploy/withdraw field: 'all'/'max' -> base, else a $ number."""
+    s = str(s).strip().lower()
+    if s in ("all", "max"):
+        return base
+    try:
+        return max(0.0, float(s.replace(",", "").replace("$", "")))
+    except ValueError:
+        return 0.0
+
+
 class RebalanceModal(ModalScreen[dict | None]):
-    """Ask how many top performers to keep, and optionally how much idle cash to
-    deploy. Shows available cash and a live 'leftover' figure as you type.
-    Returns {'n': int, 'deploy': str} or None on cancel."""
+    """Keep top-N, and (pick ONE) deploy idle cash OR withdraw/raise cash. Both
+    show a live readout as you type. Returns {'n','deploy','withdraw'} or None."""
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, avail_cash: float = 0.0):
+    def __init__(self, avail_cash: float = 0.0, invested: float = 0.0):
         super().__init__()
         self._avail = max(0.0, _f(avail_cash))
+        self._invested = max(0.0, _f(invested))
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label("Rebalance — keep the top how many (by P&L %)?\n"
                         "Sells the rest, redeploys proceeds into the kept names.\n"
-                        "Deploy idle cash: 0 = none, a $ amount, or 'all' (to ~1x).", id="q")
+                        "Then pick ONE: deploy idle cash OR withdraw (raise cash).\n"
+                        "Each field: 0 = none, a $ amount, or 'all'.", id="q")
             yield Input(value="20", id="topn", placeholder="keep top N")
             yield Label(f"Available idle cash: [b]${self._avail:,.2f}[/]", id="avail")
-            yield Input(value="0", id="deploy", placeholder="deploy idle cash: 0 / amount / all")
+            yield Input(value="0", id="deploy", placeholder="DEPLOY idle cash: 0 / amount / all")
             yield Label("", id="leftover")
+            yield Input(value="0", id="withdraw", placeholder="WITHDRAW / raise cash: 0 / amount / all")
+            yield Label("", id="remaining")
+            yield Label("", id="err")
             with Horizontal(id="buttons"):
                 yield Button("Build plan", variant="error", id="ok")
                 yield Button("Cancel", variant="primary", id="cancel")
 
     def on_mount(self) -> None:
         self._update_leftover()
+        self._update_remaining()
         self.query_one("#topn", Input).focus()
 
     def _update_leftover(self) -> None:
-        v = self.query_one("#deploy", Input).value.strip().lower()
-        if v in ("all", "max"):
-            amt = self._avail
-        else:
-            try:
-                amt = max(0.0, float(v.replace(",", "").replace("$", "")))
-            except ValueError:
-                amt = 0.0
+        amt = _amt_of(self.query_one("#deploy", Input).value, self._avail)
         left = self._avail - amt
         lbl = self.query_one("#leftover", Label)
         if left < 0:
             lbl.update(f"[yellow]deploy ${amt:,.2f} → exceeds cash by ${-left:,.2f} "
                        f"(will cap at ${self._avail:,.2f}; no leverage)[/]")
         else:
-            lbl.update(f"deploy [b]${amt:,.2f}[/] → leftover [b]${left:,.2f}[/]")
+            lbl.update(f"deploy [b]${amt:,.2f}[/] → cash leftover [b]${left:,.2f}[/]")
+
+    def _update_remaining(self) -> None:
+        amt = _amt_of(self.query_one("#withdraw", Input).value, self._invested)
+        rem = self._invested - amt
+        lbl = self.query_one("#remaining", Label)
+        if rem < 0:
+            lbl.update(f"[yellow]withdraw ${amt:,.2f} → exceeds invested ${self._invested:,.2f} "
+                       f"(will cap = flatten)[/]")
+        else:
+            lbl.update(f"withdraw [b]${amt:,.2f}[/] → remaining invested [b]${rem:,.2f}[/]")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "deploy":
             self._update_leftover()
+        elif event.input.id == "withdraw":
+            self._update_remaining()
 
     def _accept(self) -> None:
         try:
@@ -182,7 +203,14 @@ class RebalanceModal(ModalScreen[dict | None]):
         except ValueError:
             n = 0
         deploy = self.query_one("#deploy", Input).value.strip().lower() or "0"
-        self.dismiss({"n": n, "deploy": deploy} if n > 0 else None)
+        withdraw = self.query_one("#withdraw", Input).value.strip().lower() or "0"
+        d_on = deploy not in ("0", "", "0.0")
+        w_on = withdraw not in ("0", "", "0.0")
+        if d_on and w_on:
+            self.query_one("#err", Label).update(
+                "[red]pick ONE: deploy OR withdraw, not both[/]")
+            return
+        self.dismiss({"n": n, "deploy": deploy, "withdraw": withdraw} if n > 0 else None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "ok":
@@ -326,9 +354,9 @@ class ChannelModal(ModalScreen[dict | None]):
 class AlpacaTUI(App):
     TITLE = "Alpaca Paper Trader — Cockpit"
     CSS = """
-    #summary { height: auto; padding: 0 1; }
+    #summary { height: auto; padding: 0 1; text-style: bold; }
     #armbar  { height: 1; content-align: center middle; }
-    #holdings { height: 1fr; }
+    #holdings { height: 1fr; text-style: bold; }
     #log { height: 12; border: solid $accent; }
     #keys {
         dock: bottom;
@@ -369,6 +397,7 @@ class AlpacaTUI(App):
         self._tg_notify: bool = True           # send Telegram pings on actions
         self._mkt_known: bool | None = None    # last market state (for transitions)
         self._cash: float = 0.0                # idle cash from last refresh
+        self._lmv: float = 0.0                 # long market value (invested) from last refresh
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -563,6 +592,7 @@ class AlpacaTUI(App):
         rt     = _f(acct.get("regt_buying_power"))
         dtbp   = _f(acct.get("daytrading_buying_power"))
         lmv    = _f(acct.get("long_market_value"))
+        self._lmv = lmv
         daypl  = equity - last
         daypct = (daypl / last * 100) if last else 0.0
         lev    = (lmv / equity) if equity else 0.0
@@ -743,7 +773,7 @@ class AlpacaTUI(App):
         if not self._require_armed():
             return
         self.push_screen(
-            RebalanceModal(self._cash),
+            RebalanceModal(self._cash, self._lmv),
             lambda res: self._plan_rebalance(res) if res else None,
         )
 
@@ -753,47 +783,56 @@ class AlpacaTUI(App):
         try:
             positions = cc.get_positions()
             longs = [p for p in positions if _f(p.get("qty")) > 0]
-            # Resolve idle cash to deploy (1x cap — never borrow here).
-            req = res.get("deploy", "0")
             avail = rb.available_cash()
-            if req == "all":
-                deploy = avail
-            else:
-                deploy = max(0.0, _f(req))
-                if deploy > avail:
-                    self.call_from_thread(
-                        self._log,
-                        f"[yellow]deploy ${deploy:,.0f} > cash ${avail:,.0f} — capping (no leverage)[/]")
-                    deploy = avail
-            if len(longs) <= n and deploy <= 0:
+            req_d = res.get("deploy", "0")
+            req_w = res.get("withdraw", "0")
+            deploy = avail if req_d == "all" else max(0.0, _f(req_d))
+            withdraw = (sum(_f(p.get("market_value")) for p in longs)
+                        if req_w == "all" else max(0.0, _f(req_w)))
+            if deploy > 0 and withdraw > 0:
+                self.call_from_thread(self._log, "[red]pick ONE: deploy OR withdraw[/]")
+                return
+            if deploy > avail:
                 self.call_from_thread(
                     self._log,
-                    f"[yellow]only {len(longs)} long positions at top {n} and no cash to deploy[/]")
+                    f"[yellow]deploy ${deploy:,.0f} > cash ${avail:,.0f} — capping (no leverage)[/]")
+                deploy = avail
+            if len(longs) <= n and deploy <= 0 and withdraw <= 0:
+                self.call_from_thread(
+                    self._log,
+                    f"[yellow]only {len(longs)} long positions at top {n}, nothing to do[/]")
                 return
-            keep, sell, buys, freed, skipped = rb.build_plan(
-                positions, n, "plpc", 0.10, deploy_cash=deploy)
+            keep, sell, buys, trims, freed, skipped = rb.build_plan(
+                positions, n, "plpc", 0.10, deploy_cash=deploy, withdraw_cash=withdraw)
         except Exception as e:
             self.call_from_thread(self._log, f"[red]rebalance plan error: {e}[/]")
             return
-        cash_bit = f" + ${deploy:,.0f} idle cash" if deploy > 0 else ""
-        summary = (f"Rebalance: SELL {len(sell)}, deploy "
-                   f"${freed + deploy:,.0f} (${freed:,.0f} proceeds{cash_bit}) "
-                   f"into top {len(buys)}?")
+        if trims:
+            raised = sum(t["notional"] for t in trims)
+            summary = (f"Rebalance: SELL {len(sell)} + TRIM {len(trims)} kept "
+                       f"to raise ${raised:,.0f} cash?")
+        else:
+            cash_bit = f" + ${deploy:,.0f} idle cash" if deploy > 0 else ""
+            summary = (f"Rebalance: SELL {len(sell)}, deploy "
+                       f"${freed + deploy:,.0f} (${freed:,.0f} proceeds{cash_bit}) "
+                       f"into top {len(buys)}?")
         self.call_from_thread(self._log, f"[cyan]{summary}[/]")
         self.call_from_thread(
             self.push_screen,
             ConfirmModal(summary),
-            lambda ok: self._exec_rebalance(sell, buys) if ok else None,
+            lambda ok: self._exec_rebalance(sell, buys, trims) if ok else None,
         )
 
     @work(thread=True, group="action")
-    def _exec_rebalance(self, sell: list, buys: list) -> None:
+    def _exec_rebalance(self, sell: list, buys: list, trims: list) -> None:
         try:
-            rb.execute(sell, buys,
+            rb.execute(sell, buys, trims,
                        log=lambda m: self.call_from_thread(self._log, m))
             # ONE batched notification, not one per order
+            tail = (f" + {len(trims)} trims" if trims else
+                    (f" + {len(buys)} buys" if buys else ""))
             self._notify(
-                f"♻️ TUI rebalance — submitted {len(sell)} sells + {len(buys)} buys"
+                f"♻️ TUI rebalance — submitted {len(sell)} sells{tail}"
                 f"{self._mkt_suffix()}")
         except Exception as e:
             self.call_from_thread(self._log, f"[red]rebalance error: {e}[/]")
