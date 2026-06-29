@@ -432,7 +432,7 @@ class AlpacaTUI(App):
     #summary { height: auto; padding: 0 1; text-style: bold; }
     #armbar  { height: 1; content-align: center middle; }
     #holdings { height: 1fr; text-style: bold; }
-    #log { height: 12; border: solid $accent; }
+    #log { height: 7; border: solid $accent; }   /* 5 visible lines + border */
     #keys {
         dock: bottom;
         height: auto;
