@@ -41,6 +41,7 @@ from textual.screen import ModalScreen
 from textual.widgets import (
     Button, DataTable, Header, Input, Label, RichLog, Static,
 )
+from textual_plotext import PlotextPlot
 
 import hermes_report as hr
 import intraday_momentum as im
@@ -431,8 +432,10 @@ class AlpacaTUI(App):
     CSS = """
     #summary { height: auto; padding: 0 1; text-style: bold; }
     #armbar  { height: 1; content-align: center middle; }
-    #holdings { height: 1fr; text-style: bold; }
-    #log { height: 7; border: solid $accent; }   /* 5 visible lines + border */
+    #holdings { height: 1fr; text-style: bold; }            /* top half */
+    #bottom  { height: 1fr; layout: horizontal; }           /* bottom half: chart | log */
+    #chart { width: 1fr; border: solid $accent; }
+    #log { width: 1fr; border: solid $accent; }
     #keys {
         dock: bottom;
         height: auto;
@@ -474,13 +477,16 @@ class AlpacaTUI(App):
         self._cash: float = 0.0                # idle cash from last refresh
         self._lmv: float = 0.0                 # long market value (invested) from last refresh
         self._mv: dict[str, float] = {}        # per-symbol market value from last refresh
+        self._tick: int = 0                    # refresh counter (throttles the chart)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("loading…", id="summary")
         yield Static(id="armbar")
         yield DataTable(id="holdings", cursor_type="row", zebra_stripes=True)
-        yield RichLog(id="log", highlight=False, markup=True)
+        with Horizontal(id="bottom"):
+            yield PlotextPlot(id="chart")
+            yield RichLog(id="log", highlight=False, markup=True)
         yield Static(KEY_HINTS, id="keys")
 
     def on_mount(self) -> None:
@@ -637,6 +643,42 @@ class AlpacaTUI(App):
         except Exception:
             clk = None
         self.call_from_thread(self._apply, acct, positions, clk)
+
+        # Intraday equity curve — throttled (~every 4th cycle ≈ 30s); the series
+        # only moves every few minutes, so no need to refetch every 8s.
+        self._tick += 1
+        if self._tick % 4 == 1:
+            try:
+                hist = hr.fetch_portfolio_history(period="1D", timeframe="5Min")
+            except Exception:
+                hist = None
+            self.call_from_thread(self._update_chart, hist)
+
+    def _update_chart(self, hist: dict | None) -> None:
+        plot = self.query_one("#chart", PlotextPlot)
+        plt = plot.plt
+        plt.clear_figure()
+        eq = [_f(x) for x in (hist or {}).get("equity", []) if x is not None]
+        ts = (hist or {}).get("timestamp", []) or []
+        if len(eq) < 2:
+            plt.title("Equity — waiting for intraday data")
+            plot.refresh()
+            return
+        xs = list(range(len(eq)))
+        chg = eq[-1] - eq[0]
+        pct = (chg / eq[0] * 100) if eq[0] else 0.0
+        plt.plot(xs, eq, marker="braille", color=("green" if chg >= 0 else "red"))
+        step = max(1, len(ts) // 6)
+        ticks = list(range(0, len(ts), step))
+        labels = []
+        for i in ticks:
+            try:
+                labels.append(dt.datetime.fromtimestamp(int(ts[i])).strftime("%H:%M"))
+            except Exception:
+                labels.append("")
+        plt.xticks(ticks, labels)
+        plt.title(f"Equity today  ${eq[-1]:,.0f}  ({pct:+.2f}%)")
+        plot.refresh()
 
     def _market_badge(self, clk: dict | None) -> str:
         """Update market state from the clock and return a status badge string."""

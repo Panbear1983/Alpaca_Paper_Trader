@@ -101,7 +101,11 @@ python3 tui.py                  # needs a real terminal (full-screen app)
 2. **Summary line** — Equity, Cash, RegT (2x) & Daytrading (4x) buying power, Day P&L (green/red), Exposure (leverage). Second row shows a **MARKET OPEN / MARKET CLOSED** badge; when closed it notes that orders queue to the next open. Orders are `time_in_force=day` market orders, so anything placed while the market is closed is **queued by Alpaca and fills at the next open** — and arming while closed logs a reminder of this.
 3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
 4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `s` sells.
-5. **Event log** — scrolling refreshes, dry-run output, order confirmations, errors.
+5. **Bottom half (split left | right):**
+   - **Left — intraday equity curve:** a live line chart of your account value through the trading day (axes + `HH:MM` labels), green/red by day change, refreshed ~every 30s from `/account/portfolio/history` (1D/5Min).
+   - **Right — event log:** scrolling refreshes, dry-run output, order confirmations, errors.
+
+The holdings table takes the **top half**; the chart + log share the **bottom half**.
 
 Data auto-refreshes every **8 seconds** (or `r` to force it).
 
