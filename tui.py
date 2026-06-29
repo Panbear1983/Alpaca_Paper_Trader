@@ -433,9 +433,9 @@ class AlpacaTUI(App):
     #summary { height: auto; padding: 0 1; text-style: bold; }
     #armbar  { height: 1; content-align: center middle; }
     #holdings { height: 1fr; text-style: bold; }            /* top half */
-    #bottom  { height: 1fr; layout: horizontal; }           /* bottom half: chart | log */
-    #chart { width: 1fr; border: solid $accent; }
-    #log { width: 1fr; border: solid $accent; }
+    #bottom  { height: 1fr; layout: vertical; }             /* bottom half: chart over log */
+    #chart { height: 1fr; border: solid $accent; }
+    #log { height: 1fr; border: solid $accent; }
     #keys {
         dock: bottom;
         height: auto;
@@ -484,7 +484,7 @@ class AlpacaTUI(App):
         yield Static("loading…", id="summary")
         yield Static(id="armbar")
         yield DataTable(id="holdings", cursor_type="row", zebra_stripes=True)
-        with Horizontal(id="bottom"):
+        with Vertical(id="bottom"):
             yield PlotextPlot(id="chart")
             yield RichLog(id="log", highlight=False, markup=True)
         yield Static(KEY_HINTS, id="keys")
