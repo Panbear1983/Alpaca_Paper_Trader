@@ -478,6 +478,7 @@ class AlpacaTUI(App):
         self._lmv: float = 0.0                 # long market value (invested) from last refresh
         self._mv: dict[str, float] = {}        # per-symbol market value from last refresh
         self._tick: int = 0                    # refresh counter (throttles the chart)
+        self._sel_sym: str = ""                # holding the chart is currently showing
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -644,40 +645,53 @@ class AlpacaTUI(App):
             clk = None
         self.call_from_thread(self._apply, acct, positions, clk)
 
-        # Intraday equity curve — throttled (~every 4th cycle ≈ 30s); the series
-        # only moves every few minutes, so no need to refetch every 8s.
+        # Candlestick of the selected holding — throttled (~every 4th cycle ≈ 30s)
+        # so candles fill in live without refetching bars every 8s.
         self._tick += 1
-        if self._tick % 4 == 1:
-            try:
-                hist = hr.fetch_portfolio_history(period="1D", timeframe="5Min")
-            except Exception:
-                hist = None
-            self.call_from_thread(self._update_chart, hist)
+        if self._tick % 4 == 1 and self._sel_sym:
+            bars = hr.fetch_bars(self._sel_sym, "5Min")
+            self.call_from_thread(self._render_candles, self._sel_sym, bars)
 
-    def _update_chart(self, hist: dict | None) -> None:
+    # ── candlestick chart (follows the highlighted holding) ───────────────────
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        sym = str(event.row_key.value) if event.row_key else ""
+        if sym and sym != self._sel_sym:
+            self._sel_sym = sym
+            self._refresh_chart(sym)
+
+    @work(thread=True, group="chart", exclusive=True)
+    def _refresh_chart(self, sym: str) -> None:
+        bars = hr.fetch_bars(sym, "5Min")
+        self.call_from_thread(self._render_candles, sym, bars)
+
+    def _render_candles(self, sym: str, bars: list[dict]) -> None:
         plot = self.query_one("#chart", PlotextPlot)
         plt = plot.plt
         plt.clear_figure()
-        eq = [_f(x) for x in (hist or {}).get("equity", []) if x is not None]
-        ts = (hist or {}).get("timestamp", []) or []
-        if len(eq) < 2:
-            plt.title("Equity — waiting for intraday data")
+        if not sym:
+            plt.title("Select a holding (↑/↓) to see its candles")
             plot.refresh()
             return
-        xs = list(range(len(eq)))
-        chg = eq[-1] - eq[0]
-        pct = (chg / eq[0] * 100) if eq[0] else 0.0
-        plt.plot(xs, eq, marker="braille", color=("green" if chg >= 0 else "red"))
-        step = max(1, len(ts) // 6)
-        ticks = list(range(0, len(ts), step))
-        labels = []
-        for i in ticks:
+        if len(bars) < 2:
+            plt.title(f"{sym} — no intraday bars (market closed?)")
+            plot.refresh()
+            return
+        O = [_f(b.get("o")) for b in bars]
+        H = [_f(b.get("h")) for b in bars]
+        L = [_f(b.get("l")) for b in bars]
+        C = [_f(b.get("c")) for b in bars]
+        plt.date_form("H:M")
+        ds = []
+        for b in bars:
             try:
-                labels.append(dt.datetime.fromtimestamp(int(ts[i])).strftime("%H:%M"))
+                t = dt.datetime.fromisoformat(b.get("t", "").replace("Z", "+00:00"))
+                ds.append(t.astimezone().strftime("%H:%M"))
             except Exception:
-                labels.append("")
-        plt.xticks(ticks, labels)
-        plt.title(f"Equity today  ${eq[-1]:,.0f}  ({pct:+.2f}%)")
+                ds.append("")
+        plt.candlestick(ds, {"Open": O, "High": H, "Low": L, "Close": C})
+        chg = C[-1] - O[0]
+        pct = (chg / O[0] * 100) if O[0] else 0.0
+        plt.title(f"{sym} — 5m candles   ${C[-1]:,.2f}  ({pct:+.2f}%)")
         plot.refresh()
 
     def _market_badge(self, clk: dict | None) -> str:
@@ -742,6 +756,13 @@ class AlpacaTUI(App):
             )
             self._syms.append(sym)
             self._mv[sym] = _f(p.get("market_value"))
+        # Keep the user's selection (and the chart's symbol) stable across the
+        # 8s table re-populate instead of snapping back to the top row.
+        if self._sel_sym in self._syms:
+            try:
+                t.move_cursor(row=self._syms.index(self._sel_sym), animate=False)
+            except Exception:
+                pass
         self._log(f"[dim]refreshed {len(positions)} positions @ {dt.datetime.now():%H:%M:%S}[/]")
 
     # ── read-only dry-run ──────────────────────────────────────────────────--

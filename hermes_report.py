@@ -145,6 +145,28 @@ def fetch_quotes(symbols: list[str]) -> dict:
         return {"_error": str(exc)}
 
 
+def fetch_bars(symbol: str, timeframe: str = "5Min", limit: int = 300) -> list[dict]:
+    """Most-recent-session intraday OHLC bars for one symbol (candlestick chart).
+    Returns [{t,o,h,l,c}, …] oldest→newest for the latest trading day; [] on error.
+    Uses a 5-day window then keeps only the last distinct date, so it still shows
+    the previous session when the market is closed."""
+    try:
+        start = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).strftime("%Y-%m-%d")
+        r = requests.get(
+            f"{ALPACA_DATA}/stocks/{symbol}/bars",
+            headers=HEADERS,
+            params={"timeframe": timeframe, "start": start, "limit": limit},
+            timeout=10,
+        )
+        bars = r.json().get("bars", []) or []
+        if not bars:
+            return []
+        last_day = bars[-1].get("t", "")[:10]
+        return [b for b in bars if b.get("t", "")[:10] == last_day]
+    except Exception:
+        return []
+
+
 def fetch_spy_day_pct() -> float | None:
     """SPY % change open→current (or open→close) for today."""
     try:

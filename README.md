@@ -102,10 +102,10 @@ python3 tui.py                  # needs a real terminal (full-screen app)
 3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
 4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `s` sells.
 5. **Bottom half (stacked, full width):**
-   - **Top — intraday equity curve:** a live line chart of your account value through the trading day (axes + `HH:MM` labels), green/red by day change, refreshed ~every 30s from `/account/portfolio/history` (1D/5Min).
+   - **Top — candlestick chart of the selected holding:** green up / red down 5-minute candles for whichever holding your cursor is on. Move the row cursor (↑/↓) and the chart **follows the selection**; it redraws live (~every 30s) as the session fills in. Data from Alpaca bars (`/stocks/<sym>/bars`).
    - **Below — event log:** scrolling refreshes, dry-run output, order confirmations, errors.
 
-The holdings table takes the **top half**; the full-width chart and log are stacked in the **bottom half**.
+The holdings table takes the **top half**; the full-width candlestick chart and log are stacked in the **bottom half**.
 
 Data auto-refreshes every **8 seconds** (or `r` to force it).
 
