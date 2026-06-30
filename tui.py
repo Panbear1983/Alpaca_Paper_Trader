@@ -645,10 +645,11 @@ class AlpacaTUI(App):
             clk = None
         self.call_from_thread(self._apply, acct, positions, clk)
 
-        # Candlestick of the selected holding — throttled (~every 4th cycle ≈ 30s)
-        # so candles fill in live without refetching bars every 8s.
+        # Candlestick of the selected holding — refreshed on every cycle, in sync
+        # with the holdings table (8s). (5-min bars only change every few minutes,
+        # but keeping one cadence is simpler and the extra call is cheap.)
         self._tick += 1
-        if self._tick % 4 == 1 and self._sel_sym:
+        if self._sel_sym:
             bars = hr.fetch_bars(self._sel_sym, "5Min")
             self.call_from_thread(self._render_candles, self._sel_sym, bars)
 
