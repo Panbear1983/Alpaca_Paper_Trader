@@ -63,6 +63,7 @@ Data auto-refreshes every **8 seconds**.
 |-----|--------|:----------:|:--------------:|
 | `r` | Refresh now | — | — |
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
+| `o` | Toggle chart: selected holding ↔ whole portfolio (equity) | — | — |
 | `p` | Push the full portfolio report to Telegram now | — | — |
 | `g` | Edit the scheduled auto-report (on/off, time, weekdays, channel) | — | — |
 | `m` | Edit Telegram channels (default + add; config only, not `.env`) | — | — |

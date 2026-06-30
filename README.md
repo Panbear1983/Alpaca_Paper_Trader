@@ -102,7 +102,7 @@ python3 tui.py                  # needs a real terminal (full-screen app)
 3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
 4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `s` sells.
 5. **Bottom half (stacked, full width):**
-   - **Top — candlestick chart of the selected holding:** green up / red down 5-minute candles for whichever holding your cursor is on. Move the row cursor (↑/↓) and the chart **follows the selection**; it redraws live (~every 30s) as the session fills in. Data from Alpaca bars (`/stocks/<sym>/bars`).
+   - **Top — live candlestick chart:** green up / red down candles where **each candle = one refresh** (built from live price samples, finer than fixed 5-min bars). It **follows the selected holding** (move the cursor ↑/↓), or press **`o`** to chart the **whole portfolio (equity)** instead. **Click a candle** to print its time + price in the log (approximate — terminals don't expose true plot hit-testing).
    - **Below — event log:** scrolling refreshes, dry-run output, order confirmations, errors.
 
 The holdings table takes the **top half**; the full-width candlestick chart and log are stacked in the **bottom half**.
@@ -116,6 +116,7 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `r` | Refresh now | — | — |
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
 | `p` | **Push the full portfolio report** to Telegram now (same format as the daily report) | — | — |
+| `o` | Toggle the chart between the **selected holding** and the **whole portfolio** (equity) | — | — |
 | `g` | **Edit the scheduled** auto-report — opens a modal for on/off, time (HH:MM ET), weekdays-only, and channel | — | — |
 | `m` | **Edit Telegram channels** — set the default channel or add a channel (config only; chat-ID/token values stay in `.env`) | — | — |
 | `a` | Arm / Disarm toggle | — | — |

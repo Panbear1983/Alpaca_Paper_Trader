@@ -15,6 +15,7 @@ Keys:
   r  refresh now            a  arm / disarm
   d  dry-run RS ranking     q  quit
   p  push full report → Telegram (no arm needed)
+  o  toggle chart: whole portfolio (equity) vs the selected holding
   g  edit the scheduled auto-report (time / on-off / weekdays / channel)
   m  edit Telegram channels (config only — values stay in .env)
   f  flatten ALL            t  live intraday tick
@@ -32,10 +33,11 @@ import datetime as dt
 import re
 
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import (
@@ -65,8 +67,8 @@ def _f(x, default=0.0):
 # Key-hint line for the footer. Plain text with spaces so it wraps onto extra
 # lines when the terminal is narrow (the built-in Footer clips instead).
 KEY_HINTS = (
-    "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]g[/b] sched   "
-    "[b]m[/b] channels   [b]a[/b] arm/disarm   [b]q[/b] quit"
+    "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]o[/b] pf-chart   "
+    "[b]g[/b] sched   [b]m[/b] channels   [b]a[/b] arm/disarm   [b]q[/b] quit"
     "   •   "
     "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
     "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance"
@@ -425,6 +427,20 @@ class ChannelModal(ModalScreen[dict | None]):
         self.dismiss(None)
 
 
+class CandlePlot(PlotextPlot):
+    """PlotextPlot that reports the x-column of a click so the app can map it to
+    the nearest candle (terminals don't expose true plot hit-testing)."""
+
+    class Picked(Message):
+        def __init__(self, x: int, width: int) -> None:
+            self.x = x
+            self.width = width
+            super().__init__()
+
+    def on_click(self, event: events.Click) -> None:
+        self.post_message(self.Picked(event.x, self.size.width))
+
+
 # ── Main app ─────────────────────────────────────────────────────────────────
 
 class AlpacaTUI(App):
@@ -453,6 +469,7 @@ class AlpacaTUI(App):
         Binding("r", "refresh", "Refresh"),
         Binding("d", "dryrun", "Dry-run RS"),
         Binding("p", "push_report", "Push report"),
+        Binding("o", "overview", "Portfolio chart"),
         Binding("g", "edit_schedule", "Edit schedule"),
         Binding("m", "edit_channels", "Channels"),
         Binding("a", "arm", "Arm/Disarm"),
@@ -477,8 +494,15 @@ class AlpacaTUI(App):
         self._cash: float = 0.0                # idle cash from last refresh
         self._lmv: float = 0.0                 # long market value (invested) from last refresh
         self._mv: dict[str, float] = {}        # per-symbol market value from last refresh
-        self._tick: int = 0                    # refresh counter (throttles the chart)
-        self._sel_sym: str = ""                # holding the chart is currently showing
+        self._price: dict[str, float] = {}     # per-symbol current price from last refresh
+        self._equity: float = 0.0              # account equity from last refresh
+        self._tick: int = 0                    # refresh counter
+        self._sel_sym: str = ""                # holding the cursor is on
+        self._portfolio_mode: bool = False     # True = chart the whole portfolio (key 'o')
+        # live per-refresh candle series, keyed by subject ("" portfolio | symbol):
+        #   each entry is (epoch_ts, price); candles are built from consecutive samples
+        self._series: dict[str, list[tuple[float, float]]] = {}
+        self._candles: list[dict] = []         # last-rendered candles (for click hit-testing)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -486,7 +510,7 @@ class AlpacaTUI(App):
         yield Static(id="armbar")
         yield DataTable(id="holdings", cursor_type="row", zebra_stripes=True)
         with Vertical(id="bottom"):
-            yield PlotextPlot(id="chart")
+            yield CandlePlot(id="chart")
             yield RichLog(id="log", highlight=False, markup=True)
         yield Static(KEY_HINTS, id="keys")
 
@@ -645,55 +669,84 @@ class AlpacaTUI(App):
             clk = None
         self.call_from_thread(self._apply, acct, positions, clk)
 
-        # Candlestick of the selected holding — refreshed on every cycle, in sync
-        # with the holdings table (8s). (5-min bars only change every few minutes,
-        # but keeping one cadence is simpler and the extra call is cheap.)
+        # Live candles: append ONE sample per refresh to the active subject's
+        # series (finer than 5-min bars — one candle per 8s refresh).
         self._tick += 1
-        if self._sel_sym:
-            bars = hr.fetch_bars(self._sel_sym, "5Min")
-            self.call_from_thread(self._render_candles, self._sel_sym, bars)
+        subj = self._chart_subject()
+        price = self._equity if self._portfolio_mode else self._price.get(self._sel_sym)
+        if subj and price:
+            buf = self._series.setdefault(subj, [])
+            buf.append((dt.datetime.now().timestamp(), price))
+            del buf[:-240]                      # keep ~last 240 candles
+        self.call_from_thread(self._render_candles)
 
-    # ── candlestick chart (follows the highlighted holding) ───────────────────
+    # ── candlestick chart: per-refresh candles of the selected holding, or the
+    #    whole portfolio (key 'o'). Each candle = the move over one 8s refresh. ──
+    def _chart_subject(self) -> str:
+        return "__PORTFOLIO__" if self._portfolio_mode else self._sel_sym
+
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         sym = str(event.row_key.value) if event.row_key else ""
         if sym and sym != self._sel_sym:
             self._sel_sym = sym
-            self._refresh_chart(sym)
+            if not self._portfolio_mode:
+                self._render_candles()          # switch to this symbol's series
 
-    @work(thread=True, group="chart", exclusive=True)
-    def _refresh_chart(self, sym: str) -> None:
-        bars = hr.fetch_bars(sym, "5Min")
-        self.call_from_thread(self._render_candles, sym, bars)
+    def action_overview(self) -> None:
+        """Toggle: chart the whole portfolio (equity) vs the selected holding."""
+        self._portfolio_mode = not self._portfolio_mode
+        where = "PORTFOLIO (equity)" if self._portfolio_mode else f"holding {self._sel_sym or '—'}"
+        self._log(f"[cyan]chart → {where}[/]")
+        self._render_candles()
 
-    def _render_candles(self, sym: str, bars: list[dict]) -> None:
-        plot = self.query_one("#chart", PlotextPlot)
+    def _render_candles(self) -> None:
+        plot = self.query_one("#chart", CandlePlot)
         plt = plot.plt
         plt.clear_figure()
-        if not sym:
-            plt.title("Select a holding (↑/↓) to see its candles")
+        subj = self._chart_subject()
+        label = "PORTFOLIO (equity)" if self._portfolio_mode else (self._sel_sym or "—")
+        if not self._portfolio_mode and not self._sel_sym:
+            plt.title("Select a holding (↑/↓), or press 'o' for portfolio")
+            self._candles = []
             plot.refresh()
             return
-        if len(bars) < 2:
-            plt.title(f"{sym} — no intraday bars (market closed?)")
+        buf = self._series.get(subj, [])
+        if len(buf) < 2:
+            plt.title(f"{label} — gathering ticks (one candle per refresh)…")
+            self._candles = []
             plot.refresh()
             return
-        O = [_f(b.get("o")) for b in bars]
-        H = [_f(b.get("h")) for b in bars]
-        L = [_f(b.get("l")) for b in bars]
-        C = [_f(b.get("c")) for b in bars]
-        plt.date_form("H:M")
-        ds = []
-        for b in bars:
-            try:
-                t = dt.datetime.fromisoformat(b.get("t", "").replace("Z", "+00:00"))
-                ds.append(t.astimezone().strftime("%H:%M"))
-            except Exception:
-                ds.append("")
+        O = []; H = []; L = []; C = []; ds = []; cand = []
+        prev = buf[0][1]
+        for ts, pr in buf[1:]:
+            o, c = prev, pr
+            O.append(o); C.append(c); H.append(max(o, c)); L.append(min(o, c))
+            tlabel = dt.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+            ds.append(tlabel)
+            cand.append({"t": tlabel, "o": o, "c": c})
+            prev = pr
+        self._candles = cand
+        plt.date_form("H:M:S")
         plt.candlestick(ds, {"Open": O, "High": H, "Low": L, "Close": C})
         chg = C[-1] - O[0]
         pct = (chg / O[0] * 100) if O[0] else 0.0
-        plt.title(f"{sym} — 5m candles   ${C[-1]:,.2f}  ({pct:+.2f}%)")
+        plt.title(f"{label} — live candles   ${C[-1]:,.2f}  ({pct:+.2f}%)")
         plot.refresh()
+
+    def on_candle_plot_picked(self, message: CandlePlot.Picked) -> None:
+        """Map a click x-column to the nearest candle and log its price (approx —
+        terminals don't expose true plot hit-testing)."""
+        if not self._candles:
+            return
+        n = len(self._candles)
+        left, right = 8, 2                       # ~y-axis labels + borders
+        span = max(1, message.width - left - right)
+        frac = (message.x - left) / span
+        idx = min(n - 1, max(0, round(frac * (n - 1))))
+        c = self._candles[idx]
+        arrow = "[green]▲[/]" if c["c"] >= c["o"] else "[red]▼[/]"
+        self._log(f"[cyan]candle @ {c['t']}[/]  ${c['c']:,.2f} {arrow} "
+                  f"(open ${c['o']:,.2f})")
 
     def _market_badge(self, clk: dict | None) -> str:
         """Update market state from the clock and return a status badge string."""
@@ -721,6 +774,7 @@ class AlpacaTUI(App):
         equity = _f(acct.get("equity"))
         cash   = _f(acct.get("cash"))
         self._cash = cash
+        self._equity = equity
         last   = _f(acct.get("last_equity"), equity)
         rt     = _f(acct.get("regt_buying_power"))
         dtbp   = _f(acct.get("daytrading_buying_power"))
@@ -757,6 +811,7 @@ class AlpacaTUI(App):
             )
             self._syms.append(sym)
             self._mv[sym] = _f(p.get("market_value"))
+            self._price[sym] = cur
         # Keep the user's selection (and the chart's symbol) stable across the
         # 8s table re-populate instead of snapping back to the top row.
         if self._sel_sym in self._syms:
