@@ -434,8 +434,8 @@ class AlpacaTUI(App):
     #armbar  { height: 1; content-align: center middle; }
     #holdings { height: 1fr; text-style: bold; }            /* top half */
     #bottom  { height: 1fr; layout: vertical; }             /* bottom half: chart over log */
-    #chart { height: 1fr; border: solid $accent; }
-    #log { height: 1fr; border: solid $accent; }
+    #chart { height: 1fr; border: solid $accent; }          /* takes the rest */
+    #log { height: 7; border: solid $accent; }              /* fixed 5 visible lines + border */
     #keys {
         dock: bottom;
         height: auto;
