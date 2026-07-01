@@ -1,6 +1,8 @@
 # Alpaca Paper Trader
 
-An automated paper trading system that copies U.S. congressional stock disclosures into an [Alpaca](https://alpaca.markets) paper account, runs an independent TSLA ladder strategy, and delivers a daily Telegram report with full portfolio analytics.
+**Repository profile:** A supervised Alpaca paper-trading cockpit with congressional trade-copy automation, live Textual controls, multi-timeframe account charts, Telegram reporting, and archived report artifacts.
+
+Alpaca Paper Trader is a paper-account research system that copies U.S. congressional stock disclosures into an [Alpaca](https://alpaca.markets) account, scores and rotates the politician pool, supports supervised manual actions from a terminal cockpit, and preserves daily portfolio reports for review.
 
 ---
 
@@ -12,7 +14,8 @@ Congress members are required by the STOCK Act to disclose personal stock trades
 2. **Copies** qualifying buys and sells into an Alpaca paper trading account in near-real-time
 3. **Scores and rotates** politicians weekly using backtested alpha, win rate, disclosure speed, and sector diversity
 4. **Runs an independent** TSLA trailing-stop + buy-the-dip ladder strategy alongside the copy trades
-5. **Reports** a full portfolio snapshot to Telegram every weekday at 4 PM ET
+5. **Supervises** the account from a Textual TUI with arm/confirm safety gates, manual buy/sell/rebalance flows, and selectable 1D-1Y charts
+6. **Reports and archives** full portfolio snapshots as Telegram messages, chart images, and Markdown report artifacts
 
 This is a paper trading (simulated money) research project — not financial advice.
 
@@ -102,7 +105,7 @@ python3 tui.py                  # needs a real terminal (full-screen app)
 3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
 4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `s` sells.
 5. **Bottom half (stacked, full width):**
-   - **Top — live candlestick chart:** green up / red down candles where **each candle = one refresh** (built from live price samples, finer than fixed 5-min bars). It **follows the selected holding** (move the cursor ↑/↓), or press **`o`** to chart the **whole portfolio (equity)** instead. **Click a candle** to print its time + price in the log (approximate — terminals don't expose true plot hit-testing).
+   - **Top — candlestick chart:** fetched from Alpaca historical bars for the selected holding, or synthetic equity bars for the whole portfolio. It **follows the selected holding** (move the cursor ↑/↓), press **`o`** to chart the **whole portfolio (equity)**, and press **`w`** to cycle **1D → 1W → 1M → 3M → 6M → 1Y**. **Click a candle** to print its time + price in the log (approximate — terminals don't expose true plot hit-testing).
    - **Below — event log:** scrolling refreshes, dry-run output, order confirmations, errors.
 
 The holdings table takes the **top half**; the full-width candlestick chart and log are stacked in the **bottom half**.
@@ -117,6 +120,7 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
 | `p` | **Push the full portfolio report** to Telegram now (same format as the daily report) | — | — |
 | `o` | Toggle the chart between the **selected holding** and the **whole portfolio** (equity) | — | — |
+| `w` | Cycle the chart timeframe: **1D → 1W → 1M → 3M → 6M → 1Y** | — | — |
 | `g` | **Edit the scheduled** auto-report — opens a modal for on/off, time (HH:MM ET), weekdays-only, and channel | — | — |
 | `m` | **Edit Telegram channels** — set the default channel or add a channel (config only; chat-ID/token values stay in `.env`) | — | — |
 | `a` | Arm / Disarm toggle | — | — |
@@ -157,26 +161,27 @@ See [`TUI_GUIDE.md`](TUI_GUIDE.md) for the full ASCII layout diagram and a sessi
 
 | Script | Role |
 |--------|------|
-| `tui.py` | **Interactive trading cockpit** — live Textual dashboard; monitors account/positions and can flatten, run strategy cycles, or place manual buy/sell orders (arm + confirm gated). |
-| `hermes_report.py` | **Daily report** — `run_report()` builds the 4-part Telegram report + charts; callable from the CLI, the TUI (`p`), and the scheduler. |
-| `report_scheduler.py` | Config-driven trigger for the daily report — launchd heartbeat fires it; it self-gates on `report_schedule` (time/on-off in `strategy_config.json`) and dedupes to one/day. Replaces the rigid 4 PM launchd job. |
-| `capitol_copier.py` | Scrapes Capitol Trades, copies qualifying politician buys/sells to Alpaca |
-| `intraday_momentum.py` | Intraday momentum / relative-strength day-trading strategy (4x DT buying power, flat-to-cash daily) |
-| `trader.py` | Base Alpaca API wrapper (`get_account`, `get_positions`, `place_order`, `get_orders`) |
-| `tsla_strategy.py` | TSLA trailing-stop + ladder strategy execution |
-| `pool_manager.py` | Manages pool membership, trade sizing, consensus detection |
-| `politician_vetter.py` | Scores politicians, selects top 5 for pool |
-| `backtest_engine.py` | Backtests politician trades vs SPY across 5/10/15/30/60-day hold windows |
-| `politician_history.py` | Tracks per-politician pool history and probation weeks |
-| `performance_tracker.py` | Syncs filled Alpaca orders, pairs buy/sell trades, computes P&L vs SPY benchmark |
-| `sentiment_check.py` | Fetches news headlines per ticker, scores sentiment via local LLM (Ollama) |
-| `daily_briefing.py` | Morning AI briefing — reads all state files, feeds to LLM, pushes to Telegram |
-| `event_watcher.py` | Watches state files for changes every 5 min, fires Telegram alerts on new trades |
-| `sunday_review.py` | Weekly automated review — adjusts strategy config, rebalances pool weights |
-| `portfolio_report.py` | Full terminal snapshot report (run manually anytime) |
-| `hermes_client.py` | HTTP client for local Ollama LLM (gemma4:26b at localhost:11434) |
-| `telegram_notifier.py` | Telegram Bot push notification helper |
-| `cron_wrapper.sh` | launchd shell wrapper — self-gates to 4 PM ET weekdays only |
+| `tui.py` | **Interactive trading cockpit** — live Textual dashboard; monitors account/positions, charts holdings or portfolio equity across 1D-1Y, and can flatten, rebalance, run strategy cycles, or place manual buy/sell orders behind arm + confirm gates. |
+| `hermes_report.py` | **Daily report and chart data hub** — builds the Telegram report, writes Markdown report artifacts, generates charts, and exposes account/market helpers used by the TUI. |
+| `report_scheduler.py` | Config-driven report trigger; launchd fires a heartbeat, then this script gates on `report_schedule` in `strategy_config.json` and dedupes to one report/day. |
+| `capitol_copier.py` | Scrapes Capitol Trades and copies qualifying politician buys/sells to Alpaca. |
+| `intraday_momentum.py` | Intraday momentum / relative-strength day-trading strategy using day-trading buying power. |
+| `rebalance_top_n.py` | Rebalance helper used by the TUI to keep top performers, raise cash, or deploy idle cash. |
+| `config_io.py` | Shared config read/write helper for TUI schedule and Telegram channel settings. |
+| `pool_manager.py` | Manages pool membership, trade sizing, consensus detection, and exposure limits. |
+| `politician_vetter.py` | Scores politicians and selects the active pool. |
+| `politician_history.py` | Tracks per-politician pool history and probation weeks. |
+| `backtest_engine.py` | Backtests politician trades vs SPY across multiple hold windows. |
+| `performance_tracker.py` | Syncs filled Alpaca orders, pairs buy/sell trades, and computes realized P&L vs SPY. |
+| `sentiment_check.py` | Fetches ticker news headlines and scores sentiment. |
+| `openrouter_analyst.py` | Optional analyst-summary client for report commentary. |
+| `event_watcher.py` | Watches state files for changes and fires Telegram alerts on new trades or status changes. |
+| `sunday_review.py` | Weekly automated review and strategy adjustment workflow. |
+| `status.py` | Lightweight account/status inspection helper. |
+| `hermes_client.py` | HTTP client for the local LLM endpoint. |
+| `telegram_notifier.py` | Telegram Bot push notification helper. |
+| `propose_change.py` / `apply_change.py` | Proposal/apply workflow helpers for staged autonomous edits. |
+| `cron_wrapper.sh` | Legacy launchd shell wrapper that runs the report directly at 4 PM ET; the current plist in `launchd/` runs `report_scheduler.py` directly. |
 
 ---
 
@@ -187,7 +192,8 @@ See [`TUI_GUIDE.md`](TUI_GUIDE.md) for the full ASCII layout diagram and a sessi
 | `strategy_config.json` | Live strategy parameters (stop %, ladder levels, pool budget) |
 | `pool_state.json` | Current pool — scores, weights, probation flags |
 | `.copied_trades.json` | Dedup log — last check timestamp, buys/sells per politician |
-| `.tsla_state.json` | TSLA trailing stop state (highest stop price, trailing active flag) |
+| `.event_watcher_state.json` | Event watcher dedupe state for filled-order and pool-change alerts |
+| `.report_schedule_state.json` | Runtime dedupe state for the config-driven report scheduler (git-ignored) |
 | `performance_log.json` | Closed trade history with P&L, strategy tag, SPY benchmark |
 | `.sentiment_cache.json` | Cached LLM sentiment scores by ticker (TTL-based) |
 | `politician_universe.json` | Full universe of tracked politicians with trade counts |
@@ -200,7 +206,7 @@ See [`TUI_GUIDE.md`](TUI_GUIDE.md) for the full ASCII layout diagram and a sessi
 
 ## Daily Telegram Report
 
-Delivered every weekday at **4 PM ET** via `cron_wrapper.sh` → `hermes_report.py`.
+Delivered on the configured schedule via `launchd/com.alpacapapertrader.report_scheduler.plist` → `report_scheduler.py` → `hermes_report.py`, or manually from the TUI with `p`.
 
 **4 messages + 2 chart photos:**
 
@@ -223,6 +229,23 @@ Photo 1 — 30-day equity curve
 Photo 2 — Allocation pie by market value
 ```
 
+The same run also writes local artifacts under `reports/`.
+
+---
+
+## Report Artifacts
+
+Report runs create a reviewable artifact trail:
+
+| Pattern | Git policy | Contents |
+|---------|------------|----------|
+| `reports/alpaca_YYYYMMDD_HHMMSS.md` | Tracked | Markdown copy of the portfolio report sent to Telegram. |
+| `reports/alpaca_equity_YYYYMMDD_HHMMSS.png` | Ignored | Generated equity-curve chart image. |
+| `reports/alpaca_alloc_YYYYMMDD_HHMMSS.png` | Ignored | Generated allocation pie chart image. |
+| `reports/*.log` | Ignored | launchd / scheduler runtime logs. |
+
+Markdown reports are intentionally kept in the repository so account snapshots and analyst commentary can be reviewed in pull requests. PNGs and logs are derived runtime artifacts and can be regenerated by running `python3 hermes_report.py` or pressing `p` in the TUI.
+
 ---
 
 ## Setup
@@ -231,12 +254,6 @@ Photo 2 — Allocation pie by market value
 
 ```bash
 pip install -r requirements.txt
-```
-
-`requirements.txt` also needs `matplotlib` for charts — add it if missing:
-
-```bash
-pip install requests python-dotenv matplotlib
 ```
 
 ### Environment Variables
@@ -263,8 +280,8 @@ python3 hermes_report.py
 # Dry run — generate only, print to stdout, skip Telegram
 python3 hermes_report.py --dry-run
 
-# Full terminal portfolio snapshot
-python3 portfolio_report.py
+# Read-only terminal account/status snapshot
+python3 status.py
 
 # Copy latest politician trades now
 python3 capitol_copier.py
@@ -281,13 +298,13 @@ python3 sunday_review.py
 
 ### launchd Automation (macOS)
 
-The `cron_wrapper.sh` is designed to be triggered by a launchd plist that fires hourly. It self-gates: only runs `hermes_report.py` when the hour is 4 PM ET on a weekday.
+The current launchd job lives at `launchd/com.alpacapapertrader.report_scheduler.plist`. It fires every 10 minutes, runs `report_scheduler.py`, and lets the scheduler self-gate from `strategy_config.json` (`report_schedule`) so the report time can be edited from config or the TUI.
 
 ```
-launchd (hourly)
-  └─► cron_wrapper.sh
-        └─ gate: weekday AND 16:00 ET?
-            YES → python3 hermes_report.py → Telegram
+launchd (10-min heartbeat)
+  └─► report_scheduler.py
+        └─ gate: enabled, weekday, configured ET time window, not already sent today?
+            YES → hermes_report.run_report(push=True) → Telegram + reports/
             NO  → skip (log tick only)
 ```
 
@@ -298,24 +315,27 @@ launchd (hourly)
 ```
 Alpaca_Paper_Trader/
 ├── tui.py                    # interactive trading cockpit (Textual)
-├── hermes_report.py          # daily report entry point
+├── hermes_report.py          # report builder + chart/account helpers
+├── report_scheduler.py       # config-driven daily report trigger
 ├── capitol_copier.py         # smart money copy engine
 ├── intraday_momentum.py      # intraday RS day-trading strategy (4x)
-├── trader.py                 # Alpaca API base wrapper
-├── tsla_strategy.py          # TSLA ladder strategy
+├── rebalance_top_n.py        # TUI rebalance helper
+├── config_io.py              # shared config persistence
 ├── pool_manager.py           # pool membership + trade sizing
 ├── politician_vetter.py      # weekly pool scoring
-├── backtest_engine.py        # historical backtesting
 ├── politician_history.py     # pool history tracker
+├── backtest_engine.py        # historical backtesting
 ├── performance_tracker.py    # P&L sync + benchmarking
 ├── sentiment_check.py        # LLM sentiment scoring
-├── daily_briefing.py         # morning AI briefing
+├── openrouter_analyst.py     # optional analyst commentary
 ├── event_watcher.py          # real-time state watcher
 ├── sunday_review.py          # weekly auto-review
-├── portfolio_report.py       # manual terminal report
+├── status.py                 # status helper
 ├── hermes_client.py          # Ollama LLM client
 ├── telegram_notifier.py      # Telegram push helper
-├── cron_wrapper.sh           # launchd gate script
+├── propose_change.py         # staged change proposal helper
+├── apply_change.py           # staged change apply helper
+├── cron_wrapper.sh           # legacy launchd gate script
 ├── strategy_config.json      # live strategy parameters
 ├── pool_state.json           # active politician pool
 ├── performance_log.json      # closed trade history
@@ -323,7 +343,9 @@ Alpaca_Paper_Trader/
 ├── .gitignore
 ├── .env                      # (git-ignored — add your own)
 └── reports/
-    └── alpaca_YYYYMMDD_HHMMSS.md   # archived daily reports
+    ├── alpaca_YYYYMMDD_HHMMSS.md       # tracked Markdown report artifacts
+    ├── alpaca_equity_YYYYMMDD_HHMMSS.png  # ignored generated chart images
+    └── alpaca_alloc_YYYYMMDD_HHMMSS.png   # ignored generated chart images
 ```
 
 ---

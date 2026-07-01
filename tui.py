@@ -16,6 +16,7 @@ Keys:
   d  dry-run RS ranking     q  quit
   p  push full report → Telegram (no arm needed)
   o  toggle chart: whole portfolio (equity) vs the selected holding
+  w  cycle chart timeframe: 1D → 1W → 1M → 3M → 6M → 1Y
   g  edit the scheduled auto-report (time / on-off / weekdays / channel)
   m  edit Telegram channels (config only — values stay in .env)
   f  flatten ALL            t  live intraday tick
@@ -31,6 +32,9 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import zoneinfo
+
+_ET = zoneinfo.ZoneInfo("America/New_York")
 
 from rich.text import Text
 from textual import events, work
@@ -68,11 +72,14 @@ def _f(x, default=0.0):
 # lines when the terminal is narrow (the built-in Footer clips instead).
 KEY_HINTS = (
     "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]o[/b] pf-chart   "
+    "[b]w[/b] timeframe   "
     "[b]g[/b] sched   [b]m[/b] channels   [b]a[/b] arm/disarm   [b]q[/b] quit"
     "   •   "
     "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
     "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance"
 )
+
+_TIMEFRAME_KEYS = ["1D", "1W", "1M", "3M", "6M", "1Y"]
 
 
 # ── Modals ───────────────────────────────────────────────────────────────────
@@ -470,6 +477,7 @@ class AlpacaTUI(App):
         Binding("d", "dryrun", "Dry-run RS"),
         Binding("p", "push_report", "Push report"),
         Binding("o", "overview", "Portfolio chart"),
+        Binding("w", "cycle_timeframe", "Timeframe"),
         Binding("g", "edit_schedule", "Edit schedule"),
         Binding("m", "edit_channels", "Channels"),
         Binding("a", "arm", "Arm/Disarm"),
@@ -499,10 +507,12 @@ class AlpacaTUI(App):
         self._tick: int = 0                    # refresh counter
         self._sel_sym: str = ""                # holding the cursor is on
         self._portfolio_mode: bool = False     # True = chart the whole portfolio (key 'o')
+        self._chart_range: str = "1D"          # active timeframe key
         # live per-refresh candle series, keyed by subject ("" portfolio | symbol):
         #   each entry is (epoch_ts, price); candles are built from consecutive samples
         self._series: dict[str, list[tuple[float, float]]] = {}
         self._candles: list[dict] = []         # last-rendered candles (for click hit-testing)
+        self._hist_cache: dict[str, list[dict]] = {}  # cached API bars keyed by "range:subject"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -669,16 +679,9 @@ class AlpacaTUI(App):
             clk = None
         self.call_from_thread(self._apply, acct, positions, clk)
 
-        # Live candles: append ONE sample per refresh to the active subject's
-        # series (finer than 5-min bars — one candle per 8s refresh).
-        self._tick += 1
-        subj = self._chart_subject()
-        price = self._equity if self._portfolio_mode else self._price.get(self._sel_sym)
-        if subj and price:
-            buf = self._series.setdefault(subj, [])
-            buf.append((dt.datetime.now().timestamp(), price))
-            del buf[:-240]                      # keep ~last 240 candles
-        self.call_from_thread(self._render_candles)
+        # Refresh chart with latest data after apply — clear cache so bars are fresh
+        self._hist_cache.clear()
+        self.call_from_thread(self._fetch_and_render)
 
     # ── candlestick chart: per-refresh candles of the selected holding, or the
     #    whole portfolio (key 'o'). Each candle = the move over one 8s refresh. ──
@@ -690,47 +693,95 @@ class AlpacaTUI(App):
         if sym and sym != self._sel_sym:
             self._sel_sym = sym
             if not self._portfolio_mode:
-                self._render_candles()          # switch to this symbol's series
+                self._fetch_and_render()        # switch to this symbol's series
 
     def action_overview(self) -> None:
         """Toggle: chart the whole portfolio (equity) vs the selected holding."""
         self._portfolio_mode = not self._portfolio_mode
         where = "PORTFOLIO (equity)" if self._portfolio_mode else f"holding {self._sel_sym or '—'}"
         self._log(f"[cyan]chart → {where}[/]")
-        self._render_candles()
+        self._fetch_and_render()
 
-    def _render_candles(self) -> None:
+    def action_cycle_timeframe(self) -> None:
+        """Cycle through 1D → 1W → 1M → 3M → 6M → 1Y → 1D …"""
+        idx = _TIMEFRAME_KEYS.index(self._chart_range)
+        self._chart_range = _TIMEFRAME_KEYS[(idx + 1) % len(_TIMEFRAME_KEYS)]
+        self._hist_cache.clear()                # invalidate cache on range change
+        self._log(f"[cyan]chart timeframe → {self._chart_range}[/]")
+        self._fetch_and_render()
+
+    def _fetch_and_render(self) -> None:
+        """Kick off a background fetch for chart data, then render."""
+        self._do_chart_fetch()
+
+    @work(thread=True, exclusive=True, group="chart")
+    def _do_chart_fetch(self) -> None:
+        """Fetch historical bars from Alpaca API in a background thread."""
+        subj = self._chart_subject()
+        rng = self._chart_range
+        cache_key = f"{rng}:{subj}"
+        if cache_key not in self._hist_cache:
+            if not subj:
+                self.call_from_thread(self._render_candles, [])
+                return
+            if self._portfolio_mode:
+                bars = hr.fetch_portfolio_history_ranged(rng)
+            else:
+                bars = hr.fetch_bars_ranged(subj, rng)
+            self._hist_cache[cache_key] = bars
+        self.call_from_thread(self._render_candles, self._hist_cache.get(cache_key, []))
+
+    def _render_candles(self, bars: list[dict] | None = None) -> None:
         plot = self.query_one("#chart", CandlePlot)
         plt = plot.plt
         plt.clear_figure()
         subj = self._chart_subject()
+        rng = self._chart_range
         label = "PORTFOLIO (equity)" if self._portfolio_mode else (self._sel_sym or "—")
         if not self._portfolio_mode and not self._sel_sym:
             plt.title("Select a holding (↑/↓), or press 'o' for portfolio")
             self._candles = []
             plot.refresh()
             return
-        buf = self._series.get(subj, [])
-        if len(buf) < 2:
-            plt.title(f"{label} — gathering ticks (one candle per refresh)…")
+        if bars is None:
+            # Fallback: try cache
+            cache_key = f"{rng}:{subj}"
+            bars = self._hist_cache.get(cache_key, [])
+        if not bars:
+            plt.title(f"{label} [{rng}] — loading…")
             self._candles = []
             plot.refresh()
             return
+        # Get the date label format for this timeframe
+        _, _, date_fmt = hr.CHART_TIMEFRAMES.get(rng, (5, "5Min", "%H:%M"))
         O = []; H = []; L = []; C = []; ds = []; cand = []
-        prev = buf[0][1]
-        for ts, pr in buf[1:]:
-            o, c = prev, pr
-            O.append(o); C.append(c); H.append(max(o, c)); L.append(min(o, c))
-            tlabel = dt.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+        for b in bars:
+            o_val = float(b.get("o", 0))
+            h_val = float(b.get("h", 0))
+            l_val = float(b.get("l", 0))
+            c_val = float(b.get("c", 0))
+            t_raw = b.get("t", "")
+            # Parse ISO timestamp
+            try:
+                t_dt = dt.datetime.fromisoformat(t_raw.replace("Z", "+00:00")).astimezone(_ET)
+                tlabel = t_dt.strftime(date_fmt)
+            except Exception:
+                tlabel = t_raw[:16]
+            O.append(o_val); H.append(h_val); L.append(l_val); C.append(c_val)
             ds.append(tlabel)
-            cand.append({"t": tlabel, "o": o, "c": c})
-            prev = pr
+            cand.append({"t": tlabel, "o": o_val, "c": c_val})
         self._candles = cand
-        plt.date_form("H:M:S")
+        # Pick plotext date_form based on range
+        if rng == "1D":
+            plt.date_form("H:M")
+        elif rng == "1W":
+            plt.date_form("m/d H:M")
+        else:
+            plt.date_form("m/d")
         plt.candlestick(ds, {"Open": O, "High": H, "Low": L, "Close": C})
-        chg = C[-1] - O[0]
-        pct = (chg / O[0] * 100) if O[0] else 0.0
-        plt.title(f"{label} — live candles   ${C[-1]:,.2f}  ({pct:+.2f}%)")
+        chg = C[-1] - O[0] if O else 0
+        pct = (chg / O[0] * 100) if O and O[0] else 0.0
+        plt.title(f"{label} [{rng}]   ${C[-1]:,.2f}  ({pct:+.2f}%)")
         plot.refresh()
 
     def on_candle_plot_picked(self, message: CandlePlot.Picked) -> None:
@@ -771,6 +822,7 @@ class AlpacaTUI(App):
         return f"[b black on yellow] MARKET CLOSED [/][yellow] orders queue → {self._next_open}[/]"
 
     def _apply(self, acct: dict, positions: list[dict], clk: dict | None = None) -> None:
+        self._tick += 1
         equity = _f(acct.get("equity"))
         cash   = _f(acct.get("cash"))
         self._cash = cash
@@ -796,6 +848,15 @@ class AlpacaTUI(App):
         t.clear()
         self._syms = []
         self._mv = {}
+
+        # Record portfolio equity for the chart
+        now_ts = dt.datetime.now().timestamp()
+        if acct.get("equity") is not None:
+            buf = self._series.setdefault("__PORTFOLIO__", [])
+            buf.append((now_ts, equity))
+            del buf[:-240]
+
+
         for p in sorted(positions, key=lambda x: _f(x.get("unrealized_pl")), reverse=True):
             sym  = p.get("symbol", "?")
             qty  = _f(p.get("qty"))
@@ -812,6 +873,12 @@ class AlpacaTUI(App):
             self._syms.append(sym)
             self._mv[sym] = _f(p.get("market_value"))
             self._price[sym] = cur
+
+            # Record individual stock price for the chart
+            if p.get("current_price") is not None:
+                buf = self._series.setdefault(sym, [])
+                buf.append((now_ts, cur))
+                del buf[:-240]
         # Keep the user's selection (and the chart's symbol) stable across the
         # 8s table re-populate instead of snapping back to the top row.
         if self._sel_sym in self._syms:

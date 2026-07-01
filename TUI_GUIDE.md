@@ -30,6 +30,9 @@ Needs a real terminal (full-screen app). Reads creds from `.env`.
 │ AAPL   30    190.00  188.10   -57       -1.0%                 │
 │ ...                                                           │
 ├──────────────────────────────────────────────────────────────┤
+│ GEV [1D]  $1,177.00 (+15.3%)                                 │  ← Chart (selected holding or portfolio)
+│  candlesticks from Alpaca bars                                │
+├──────────────────────────────────────────────────────────────┤
 │ booted DISARMED — press 'a' to enable live actions           │  ← Event log (last ~12 lines)
 │ refreshed 7 positions @ 14:23:01                             │
 ├──────────────────────────────────────────────────────────────┤
@@ -37,7 +40,7 @@ Needs a real terminal (full-screen app). Reads creds from `.env`.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Five regions:
+Six regions:
 
 1. **Header** — app title and a live clock.
 2. **Summary line** — Equity, Cash, RegT buying power (2x), Day-trading buying
@@ -52,7 +55,11 @@ Five regions:
    (winners on top). Columns: SYM, QTY, AVG entry, current PRICE, P&L $, P&L %.
    P&L cells are green/red. **Move the row cursor with ↑/↓** — the selected row
    is what `s` (sell) acts on.
-5. **Event log** — scrolling status: refreshes, dry-run output, order
+5. **Candlestick chart** — fetched from Alpaca historical bars for the selected
+   holding, or synthetic equity bars for the whole portfolio. Press `o` to
+   toggle holding vs portfolio, and press `w` to cycle 1D → 1W → 1M → 3M → 6M
+   → 1Y.
+6. **Event log** — scrolling status: refreshes, dry-run output, order
    confirmations, and errors.
 
 Data auto-refreshes every **8 seconds**.
@@ -64,6 +71,7 @@ Data auto-refreshes every **8 seconds**.
 | `r` | Refresh now | — | — |
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
 | `o` | Toggle chart: selected holding ↔ whole portfolio (equity) | — | — |
+| `w` | Cycle chart timeframe: 1D → 1W → 1M → 3M → 6M → 1Y | — | — |
 | `p` | Push the full portfolio report to Telegram now | — | — |
 | `g` | Edit the scheduled auto-report (on/off, time, weekdays, channel) | — | — |
 | `m` | Edit Telegram channels (default + add; config only, not `.env`) | — | — |
@@ -93,7 +101,8 @@ The Buy flow has an extra step: `b` first opens a form (symbol + notional USD),
 
 1. Launch → it boots DISARMED, positions load.
 2. Press `d` to preview the intraday RS ranking (safe, no orders).
-3. Watch the summary + holdings update every 8s.
+3. Watch the summary + holdings update every 8s; use `o` and `w` to inspect
+   portfolio/holding charts across timeframes.
 4. To act: press `a` (bar goes red) → press the action key → confirm Yes.
 5. Press `a` again to disarm when done, or `q` to quit.
 

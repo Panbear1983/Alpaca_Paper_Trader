@@ -167,6 +167,89 @@ def fetch_bars(symbol: str, timeframe: str = "5Min", limit: int = 300) -> list[d
         return []
 
 
+# Timeframe presets for the TUI chart: (lookback_days, alpaca_bar_timeframe, date_label_format)
+CHART_TIMEFRAMES: dict[str, tuple[int, str, str]] = {
+    "1D":  (5,    "5Min",  "%H:%M"),       # 5-min bars, last trading day
+    "1W":  (10,   "30Min", "%m/%d %H:%M"), # 30-min bars, ~1 week
+    "1M":  (35,   "1Day",  "%m/%d"),       # daily bars, ~1 month
+    "3M":  (95,   "1Day",  "%m/%d"),       # daily bars, ~3 months
+    "6M":  (185,  "1Day",  "%m/%d"),       # daily bars, ~6 months
+    "1Y":  (370,  "1Day",  "%m/%d"),       # daily bars, ~1 year
+}
+
+
+def fetch_bars_ranged(symbol: str, range_key: str = "1D") -> list[dict]:
+    """Fetch OHLC bars for a symbol over the given range key (1D/1W/1M/3M/6M/1Y).
+    Returns [{t,o,h,l,c}, …] oldest→newest; [] on error."""
+    preset = CHART_TIMEFRAMES.get(range_key)
+    if not preset:
+        return []
+    lookback_days, bar_tf, _ = preset
+    try:
+        start = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        r = requests.get(
+            f"{ALPACA_DATA}/stocks/{symbol}/bars",
+            headers=HEADERS,
+            params={"timeframe": bar_tf, "start": start, "limit": 1000},
+            timeout=10,
+        )
+        bars = r.json().get("bars", []) or []
+        if not bars:
+            return []
+        if range_key == "1D":
+            # Find the last day that has ≥10 regular-session bars (13:30–20:00 UTC = 9:30am–4pm ET).
+            # Falls back to previous day when today's session hasn't opened yet (pre-market only).
+            from collections import defaultdict
+            by_day: dict[str, list] = defaultdict(list)
+            for b in bars:
+                by_day[b.get("t", "")[:10]].append(b)
+            for day in sorted(by_day.keys(), reverse=True):
+                session = [b for b in by_day[day]
+                           if "13:30" <= b.get("t", "")[11:16] <= "20:00"]
+                if len(session) >= 10:
+                    return sorted(session, key=lambda b: b.get("t", ""))
+            # Fallback: all bars for the most recent day
+            last_day = bars[-1].get("t", "")[:10]
+            bars = [b for b in bars if b.get("t", "")[:10] == last_day]
+        elif range_key == "1W":
+            # Filter to regular session only (removes pre-market clutter from 30Min bars)
+            bars = [b for b in bars if "13:30" <= b.get("t", "")[11:16] <= "20:00"]
+        return bars
+    except Exception:
+        return []
+
+
+# Alpaca portfolio history period strings per range key
+_PH_PERIOD = {"1D": "1D", "1W": "1W", "1M": "1M", "3M": "3M", "6M": "6M", "1Y": "1A"}
+_PH_TF     = {"1D": "5Min", "1W": "30Min", "1M": "1D", "3M": "1D", "6M": "1D", "1Y": "1D"}
+
+
+def fetch_portfolio_history_ranged(range_key: str = "1D") -> list[dict]:
+    """Fetch portfolio equity history as synthetic OHLC bars.
+    Returns [{t,o,h,l,c}, …] oldest→newest; [] on error."""
+    period = _PH_PERIOD.get(range_key, "1M")
+    tf = _PH_TF.get(range_key, "1D")
+    try:
+        hist = _get(f"{ALPACA_BASE}/account/portfolio/history",
+                     period=period, timeframe=tf)
+        timestamps = hist.get("timestamp", [])
+        equities = hist.get("equity", [])
+        if not timestamps or not equities:
+            return []
+        bars = []
+        prev_eq = equities[0]
+        for ts, eq in zip(timestamps, equities):
+            if eq is None:
+                continue
+            o = prev_eq if prev_eq is not None else eq
+            bars.append({"t": dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).isoformat(),
+                         "o": o, "h": max(o, eq), "l": min(o, eq), "c": eq})
+            prev_eq = eq
+        return bars
+    except Exception:
+        return []
+
+
 def fetch_spy_day_pct() -> float | None:
     """SPY % change open→current (or open→close) for today."""
     try:
