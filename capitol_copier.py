@@ -235,10 +235,11 @@ def manage_open_positions(cfg, dry_run=False):
     actions  = 0
     acts     = []   # collect all actions, push ONE consolidated message at end
 
-    # prune state for positions we no longer hold
+    # prune state for positions we no longer hold (keys starting with "_" are
+    # meta-state — e.g. "_stopped" history used by swing_buyer's cooldown)
     held = {p["symbol"] for p in positions}
     for sym in list(pstate.keys()):
-        if sym not in held:
+        if sym not in held and not sym.startswith("_"):
             pstate.pop(sym, None)
 
     def _liquidate(p, reason):
@@ -300,6 +301,8 @@ def manage_open_positions(cfg, dry_run=False):
             acts.append(f"🛑 STOP `{sym}` {plpc*100:+.1f}%")
             if not dry_run:
                 place_market_order(sym, "sell", qty=qty)
+                # record stop date so swing_buyer won't rebuy during cooldown
+                pstate.setdefault("_stopped", {})[sym] = datetime.now(timezone.utc).date().isoformat()
             pstate.pop(sym, None)
             actions += 1
             continue
@@ -311,6 +314,7 @@ def manage_open_positions(cfg, dry_run=False):
             acts.append(f"📉 TRAIL `{sym}` +{peak_gain*100:.0f}%→{plpc*100:+.1f}%")
             if not dry_run:
                 place_market_order(sym, "sell", qty=qty)
+                pstate.setdefault("_stopped", {})[sym] = datetime.now(timezone.utc).date().isoformat()
             pstate.pop(sym, None)
             actions += 1
             continue
@@ -347,7 +351,7 @@ def manage_open_positions(cfg, dry_run=False):
                 if exposure + add_size > max_exp:
                     print(f"  {tag}• PYRAMID {sym} skipped — would breach exposure cap "
                           f"(${exposure:.0f}+${add_size:.0f} > ${max_exp:.0f})")
-                    st["adds_done"] = idx + 1   # don't retry this tier forever
+                    # do NOT burn the tier — retry when exits free up headroom
                     break
                 print(f"  {tag}↑ PYRAMID {sym}  +{plpc*100:.0f}% >= +{thr*100:.0f}%  "
                       f"→ add ${add_size:.0f}")
@@ -404,6 +408,20 @@ def copy_trade(trade, all_pool_buys, state, cfg):
     if not is_eligible_ticker(ticker, cfg):
         return False, f"off-target/non-standard ticker {ticker}", 0
 
+    # Freshness filter — a disclosure published more than max_disclosure_lag_days
+    # ago is stale information; the 30d-hold alpha measured by backtest_engine
+    # decays fast with entry lag. (Config key existed but was never enforced.)
+    max_lag = cfg["capitol_copier"].get("max_disclosure_lag_days")
+    if max_lag:
+        pub = trade.get("pub_date", "")
+        if pub:
+            try:
+                age = (date.today() - datetime.strptime(pub, "%Y-%m-%d").date()).days
+                if age > max_lag:
+                    return False, f"disclosure too old ({age}d > {max_lag}d)", 0
+            except ValueError:
+                pass
+
     # SELL logic: only sell if we hold a position
     if tx_type == "sell":
         pos = get_position(ticker)
@@ -445,6 +463,19 @@ def copy_trade(trade, all_pool_buys, state, cfg):
     if cfg["capitol_copier"].get("sentiment_veto_enabled", True):
         if sentiment and sentiment.get("score") == 1:
             return False, f"sentiment veto (1/5: {sentiment.get('flag','')})", 0
+
+    # Holding-aware sizing — respect the per-name cap against what we ALREADY
+    # hold, not just this order's size. Prevents a second disclosure for a name
+    # we're full on from doubling exposure.
+    max_pos = cfg["pool"]["max_position_usd"]
+    pos = get_position(ticker)
+    held_mv = abs(float(pos.get("market_value", 0) or 0)) if pos and "symbol" in pos else 0.0
+    if held_mv >= max_pos:
+        return False, f"already at per-name cap (${held_mv:.0f}/${max_pos})", 0
+    if held_mv + size > max_pos:
+        size = round(max_pos - held_mv, 2)
+        if size < cfg["pool"]["min_position_usd"]:
+            return False, f"headroom under per-name cap too small (${size:.0f})", 0
 
     # Exposure cap check
     equity = get_account_equity() or 100000
@@ -562,6 +593,56 @@ def run(dry_run=False):
     save_state(state)
 
 
+def manage_only(dry_run=False, require_market_open=True):
+    """Run ONLY the dynamic exit/pyramid engine — no disclosure scan, no copies.
+    Designed for a high-frequency schedule (every ~20 min during market hours);
+    the copy loop runs separately on its own daily cadence."""
+    import urllib3
+    urllib3.disable_warnings()
+
+    if require_market_open and not dry_run:
+        try:
+            r = requests.get(f"{BASE_URL}/clock", headers=ALPACA_HEADERS, timeout=10)
+            if not r.json().get("is_open"):
+                print("  market CLOSED — manage-only tick skipped.")
+                return
+        except Exception as e:
+            print(f"  clock check failed ({e}) — proceeding anyway.")
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    print(f"[{now}] Capitol Copier — manage-only tick{' (DRY RUN)' if dry_run else ''}")
+    manage_open_positions(load_config(), dry_run=dry_run)
+
+
+def sync_state():
+    """Reconciliation: mark every currently-visible pool disclosure as copied
+    WITHOUT trading, so the next live copy run starts from a clean slate and
+    can never re-buy positions that were opened by another process (the old
+    cloud routines never wrote to .copied_trades.json)."""
+    import urllib3
+    urllib3.disable_warnings()
+
+    state = load_state()
+    pool  = pool_manager.get_pool()
+    if not pool:
+        print("POOL IS EMPTY — nothing to sync.")
+        return
+
+    before = len(state["copied"])
+    for member in pool:
+        pid = member["politician_id"]
+        trades = fetch_politician_trades(pid)
+        added = 0
+        for t in trades:
+            if t["tx_id"] and t["tx_id"] not in state["copied"]:
+                state["copied"].append(t["tx_id"])
+                added += 1
+        print(f"  {pid}: {len(trades)} disclosures visible, {added} marked as copied")
+    save_state(state)
+    print(f"\n  Sync complete: {before} → {len(state['copied'])} tx_ids marked copied. "
+          f"No orders placed.")
+
+
 def rebalance(target_pct=0.60, max_tickers_per_member=5):
     """One-time reallocation toward `target_pct` of equity invested via Capitol
     Copier picks, spread across each pool member's most recent distinct buys."""
@@ -666,9 +747,17 @@ if __name__ == "__main__":
                          help="Target fraction of equity actively invested (default 0.60)")
     parser.add_argument("--dry-run", action="store_true",
                          help="Preview dynamic-exit/pyramid decisions only — no orders, no new copies")
+    parser.add_argument("--manage-only", action="store_true",
+                         help="Run the exit/pyramid engine only (no disclosure scan) — for the high-frequency schedule")
+    parser.add_argument("--sync-state", action="store_true",
+                         help="Mark all currently-visible pool disclosures as copied WITHOUT trading (reconciliation)")
     args = parser.parse_args()
 
-    if args.rebalance:
+    if args.sync_state:
+        sync_state()
+    elif args.rebalance:
         rebalance(target_pct=args.target_pct)
+    elif args.manage_only:
+        manage_only(dry_run=args.dry_run)
     else:
         run(dry_run=args.dry_run)

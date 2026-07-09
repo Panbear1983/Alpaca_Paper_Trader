@@ -121,9 +121,15 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `p` | **Push the full portfolio report** to Telegram now (same format as the daily report) | — | — |
 | `o` | Toggle the chart between the **selected holding** and the **whole portfolio** (equity) | — | — |
 | `w` | Cycle the chart timeframe: **1D → 1W → 1M → 3M → 6M → 1Y** | — | — |
+| `v` | Toggle main table between **POSITIONS** and **OPEN ORDERS** view | — | — |
 | `g` | **Edit the scheduled** auto-report — opens a modal for on/off, time (HH:MM ET), weekdays-only, and channel | — | — |
 | `m` | **Edit Telegram channels** — set the default channel or add a channel (config only; chat-ID/token values stay in `.env`) | — | — |
+| `n` | **Strategy config editor** — browse and edit all 32 live trading tunables (risk rails, exit thresholds, swing-buyer sizing, scheduler cadence). See [Strategy Config Editor](#strategy-config-editor-n) below. | — | per-field |
+| `k` | **Switch wallet** — pick which Alpaca paper account the TUI views and manually acts on (autonomous engines stay on the default `.env` account). `e` inside the picker renames a wallet | — | — |
+| `W` | **Compare wallets** — read-only scrollable page: leaderboard ranked by window return, all-wallets normalized equity overlay, then each wallet's equity curve + top-down payout breakdown (every position, biggest P&L first). Inside: `w` cycles the window (1D→1Y), `r` refetches, ↑/↓ PgUp/PgDn scroll. Trade keys are disabled while open | — | — |
+| `h` | **In-app manual** — this README, rendered inside the TUI with a navigable topic index. See [In-App Manual](#in-app-manual-h) below. | — | — |
 | `a` | Arm / Disarm toggle | — | — |
+| `l` | **Language toggle** — cycle English ⇄ 繁體中文 live; persisted to `strategy_config.json` (`tui.language`), so the TUI boots in your last-chosen language. Modals pick it up next time they open. Manual (`h`) loads `README.zh_TW.md` when present, else this English README | — | — |
 | `q` | Quit | — | — |
 | `f` | **Flatten ALL** positions to cash | ✅ | ✅ |
 | `t` | Live intraday momentum tick | ✅ | ✅ |
@@ -131,6 +137,8 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `b` | Manual **Buy** (symbol + notional $) — live "cash after" readout as you type | ✅ | ✅ |
 | `s` | **Sell** the cursor-selected row — `all` or a $ amount (partial); live "cash after / position left" readout | ✅ | ✅ |
 | `e` | **Rebalance to top-N** — keep the best N by P&L %, sell the rest, redeploy proceeds; then pick ONE: **deploy idle cash** (buy, ~1x) or **withdraw / raise cash** (trim holdings to a $ target). Each field takes a $ amount or `all`, with a live readout | ✅ | ✅ |
+| `x` | **Cancel** the selected open order (only active in ORDERS view, `v`) | — | ✅ |
+| `X` | **Cancel ALL** open orders (only active in ORDERS view, `v`) | — | ✅ |
 
 ### Arm / Disarm safety
 
@@ -140,6 +148,141 @@ The cockpit boots **DISARMED** (read-only). Every account-mutating key (`f` `t` 
 2. **Confirm modal** — even when armed, each action pops a Yes/No dialog showing exactly what it will do (`y`/Enter = Yes, `n`/Esc = No).
 
 So nothing executes until you've deliberately armed *and* confirmed. Press `a` again to disarm.
+
+---
+
+## Autonomous Trading Engines
+
+Beyond the manual TUI actions above, two engines can trade **on their own schedule** —
+supervised, not hands-on. Both are driven by `trading_scheduler.py`, a 10-minute
+launchd heartbeat that self-gates to US market hours and dispatches:
+
+| Engine | Cadence | What it does | Master switch |
+|---|---|---|---|
+| **Exit engine** (`capitol_copier.py --manage-only`) | every `manage_every_minutes` (default 20) during market hours | Stop-loss, trailing stop, take-profit, and pyramid-add checks on every held position | `capitol_copier.autorun_enabled` |
+| **Swing buyer** (`swing_buyer.py`) | once daily, `swing.swing_time_et` window | Regime-filtered relative-strength entries + dip-adds on proven winners | `swing.enabled` |
+| **Disclosure copier** (`capitol_copier.py`, copy loop) | once daily, `trading_schedule.copy_time_et` window | Copies fresh politician-disclosed buys/sells from the tracked pool | `capitol_copier.autorun_enabled` |
+
+Both master switches — and every threshold, size, and cadence these engines use — are
+tunable **live from the TUI** via the `n` key (next section). Nothing here requires
+restarting the TUI or the scheduler; edits apply on the engine's next tick.
+
+**Kill switch:** flip either master switch to off (via `n`, or by hand in
+`strategy_config.json`), or `launchctl unload ~/Library/LaunchAgents/com.alpacapapertrader.trading_scheduler.plist`
+to stop the heartbeat entirely. Full architecture, backtest results, and the
+go-live runbook are in [`TRADING_UPGRADE_REPORT.md`](TRADING_UPGRADE_REPORT.md).
+
+---
+
+## Strategy Config Editor (`n`)
+
+Press `n` in the TUI to open a live browser/editor over every tunable the autonomous
+engines read. It's organized as a table: **SECTION | SETTING | VALUE | RANGE** — move
+the cursor with ↑/↓, press **Enter** to edit the selected row, **`r`** to reload from
+disk, **Esc** to close.
+
+### How it works
+
+- **Read this first:** the `n` page does not represent a *different* trading
+  technique — it's the control panel for the *one* technique already coded in
+  `swing_buyer.py` / `capitol_copier.py`. The buy/sell *logic* ("sell at a loss
+  threshold", "buy the top relative-strength names") is fixed in Python. The `n`
+  page only edits the *numbers* that logic reads (which threshold, how big a buy,
+  how often to check) — you cannot use it to switch strategies.
+- Every edit is validated against a bounds registry (`config_fields.py`) before
+  it's accepted — out-of-range values are rejected in place with an inline error.
+- Saves are atomic (`config_io.update_config`) and touch **only the one field you
+  changed** — safe to edit while the scheduler or `sunday_review.py` is running.
+- Changes take effect on the engine's **next tick** — up to `manage_every_minutes`
+  for exits, or up to a day for the swing-buyer/copier windows. No restart needed.
+- Fields marked **⚠ danger** show a live consequence preview before saving — e.g.
+  enabling "prune off-sector holdings" lists the exact positions that would be
+  sold on the next tick, computed from your current holdings at the moment you
+  confirm.
+- `intraday.*` (the separate 4x leveraged day-trading strategy behind the `t` key)
+  is **intentionally not editable here** — it is a distinct, higher-risk strategy
+  whose end-of-day flatten would liquidate the entire swing book if left on
+  alongside the autonomous engines. It stays hand-edit-only in
+  `strategy_config.json`, off by default.
+
+### Full field reference
+
+**MASTER switches**
+
+| Setting | Config path | Range | ⚠ | What it controls |
+|---|---|---|:-:|---|
+| Swing buyer ON/OFF | `swing.enabled` | on/off | ⚠ | Daily RS-momentum buys + dip-adds. |
+| Capitol autorun ON/OFF | `capitol_copier.autorun_enabled` | on/off | ⚠ | Exit engine (20-min stops/trails/TPs/pyramids) + daily disclosure copies. |
+
+**RISK rails**
+
+| Setting | Config path | Range | ⚠ | What it controls |
+|---|---|---|:-:|---|
+| Max exposure (frac of equity) | `pool.max_total_exposure_pct` | 0.30–1.00 | ⚠ | Hard cap on invested market value. 1.00 = fully invested (margin edge). |
+| Cash reserve floor $ | `swing.min_cash_reserve_usd` | 0–50,000 | | Swing buyer never spends below this cash cushion. |
+| Per-name cap $ | `pool.max_position_usd` | 500–25,000 | | No single position may exceed this market value via buys/adds. |
+| Min order size $ | `pool.min_position_usd` | 50–5,000 | | Orders smaller than this are skipped. |
+
+**EXIT engine**
+
+| Setting | Config path | Range | ⚠ | What it controls |
+|---|---|---|:-:|---|
+| Stop-loss (frac) | `dynamic_exits.stop_loss_pct` | 0.02–0.25 | | Sell all when unrealized loss reaches this (0.08 = -8%). |
+| Trail trigger (frac) | `dynamic_exits.trail_trigger_pct` | 0.05–0.50 | | Trailing stop activates once peak gain reaches this. |
+| Trail giveback (frac) | `dynamic_exits.trail_giveback_pct` | 0.02–0.25 | | After trigger, sell if price falls this far off the peak. |
+| Pyramid add size (frac of orig) | `dynamic_exits.pyramid_add_frac` | 0.0–1.0 | | Each pyramid tier adds this fraction of the original position size. |
+| Max holdings (exit engine) | `dynamic_exits.max_holdings` | 5–40 | ⚠ | Cap-tail: exceeding this sells the smallest positions next tick. |
+| Prune off-sector holdings | `dynamic_exits.prune_off_target` | on/off | ⚠⚠ | Enabling sells EVERY position outside `target_sectors` next tick. |
+
+**SWING buyer**
+
+| Setting | Config path | Range | ⚠ | What it controls |
+|---|---|---|:-:|---|
+| New entry size $ | `swing.entry_size_usd` | 500–10,000 | | Notional per new RS-momentum entry. |
+| Max new entries / day | `swing.max_new_positions_per_run` | 0–5 | | 0 pauses new entries while keeping dip-adds. |
+| RS lookback (days) | `swing.rs_lookback_days` | 5–60 | | Relative-strength ranking window vs SPY. |
+| Regime SMA (days) | `swing.regime_sma_days` | 20–200 | | No new buys while SPY closes below this moving average. |
+| Dip-add size $ | `swing.dip_add_usd` | 0–5,000 | | Notional added to a proven winner on a pullback. 0 disables dip-adds. |
+| Dip: min peak gain (frac) | `swing.dip_min_peak_gain` | 0.03–0.30 | | Position must have been up this much at its peak to qualify. |
+| Dip: pullback off peak (frac) | `swing.dip_trigger_off_peak` | 0.02–0.15 | | ...and pulled back at least this far off that peak (while still above entry). |
+| Dip cooldown (days) | `swing.dip_cooldown_days` | 1–30 | | At most one dip-add per name per this many days. |
+| Stop re-buy cooldown (days) | `swing.stop_cooldown_days` | 0–30 | | Never rebuy a name the exit engine stopped out within this window. |
+| Max holdings (swing buyer) | `swing.max_holdings` | 5–40 | | Swing buyer opens no new names beyond this count. |
+
+**COPIER (politician disclosures)**
+
+| Setting | Config path | Range | ⚠ | What it controls |
+|---|---|---|:-:|---|
+| Daily copy budget $ | `pool.daily_budget_usd` | 500–5,000 | | Base budget split by pool weights when copying disclosures. |
+| Consensus boost × | `pool.consensus_boost_multiplier` | 1.0–5.0 | | Size multiplier when 2+ pool members buy the same ticker within 14 days. |
+| Max disclosure age (days) | `capitol_copier.max_disclosure_lag_days` | 3–45 | | Skip disclosures older than this — stale info has no edge. |
+| Sentiment veto | `capitol_copier.sentiment_veto_enabled` | on/off | | If on, a 1/5 bearish LLM sentiment blocks the buy (off = only scales size). |
+| Target sectors (csv) | `capitol_copier.target_sectors` | sector list | | Whitelist for NEW copy buys (see `sectors.py` for the ticker→sector map). |
+
+**SCHEDULER**
+
+| Setting | Config path | Range | ⚠ | What it controls |
+|---|---|---|:-:|---|
+| Exit engine cadence (min) | `trading_schedule.manage_every_minutes` | 5–120 | | How often stops/trails/TPs are checked during market hours. |
+| Swing buy time (ET) | `trading_schedule.swing_time_et` | HH:MM | | Daily swing-buyer window start, 24h ET. |
+| Copy loop time (ET) | `trading_schedule.copy_time_et` | HH:MM | | Daily disclosure-copy window start, 24h ET. |
+| Daily window width (min) | `trading_schedule.window_minutes` | 10–60 | | Width of the swing/copy fire windows. |
+| Weekdays only | `trading_schedule.weekdays_only` | on/off | | Skip Saturday/Sunday ticks entirely. |
+
+The registry above is the literal source of truth read by the TUI — see
+`config_fields.py` if you want the field definitions in code form.
+
+---
+
+## In-App Manual (`h`)
+
+Press `h` anywhere in the TUI to open this README **inside the dashboard**, rendered
+with Textual's `MarkdownViewer` — tables, headings, and links render as formatted
+text, and a **table-of-contents sidebar is generated automatically from every
+heading in this file**. Use ↑/↓ to move through the topic index, **Enter** to jump
+straight to a section, arrow keys / Page Up / Page Down to scroll the body, and
+**Esc** to close. You never need to leave the terminal or locate this file on disk —
+whatever's in `README.md` is what you see, always current with the repo.
 
 ### Telegram notifications
 
@@ -161,13 +304,18 @@ See [`TUI_GUIDE.md`](TUI_GUIDE.md) for the full ASCII layout diagram and a sessi
 
 | Script | Role |
 |--------|------|
-| `tui.py` | **Interactive trading cockpit** — live Textual dashboard; monitors account/positions, charts holdings or portfolio equity across 1D-1Y, and can flatten, rebalance, run strategy cycles, or place manual buy/sell orders behind arm + confirm gates. |
+| `tui.py` | **Interactive trading cockpit** — live Textual dashboard; monitors account/positions, charts holdings or portfolio equity across 1D-1Y, and can flatten, rebalance, run strategy cycles, or place manual buy/sell orders behind arm + confirm gates. Also hosts the strategy config editor (`n`) and in-app manual (`h`). |
+| `trading_scheduler.py` | **Autonomous engine dispatcher** — 10-min launchd heartbeat; self-gates to market hours and fires the exit engine, swing buyer, and disclosure copier on their configured cadences. Master switches live in `strategy_config.json`. |
+| `swing_buyer.py` | **Autonomous buy engine** — daily regime-filtered relative-strength entries + dip-adds on proven winners. `--dry-run` / `--rank` / `--force` modes. |
+| `backtest_swing.py` | No-lookahead historical backtest of the swing-buyer + exit-engine rules (daily bars, fills at next-open, slippage modeled). |
 | `hermes_report.py` | **Daily report and chart data hub** — builds the Telegram report, writes Markdown report artifacts, generates charts, and exposes account/market helpers used by the TUI. |
 | `report_scheduler.py` | Config-driven report trigger; launchd fires a heartbeat, then this script gates on `report_schedule` in `strategy_config.json` and dedupes to one report/day. |
-| `capitol_copier.py` | Scrapes Capitol Trades and copies qualifying politician buys/sells to Alpaca. |
-| `intraday_momentum.py` | Intraday momentum / relative-strength day-trading strategy using day-trading buying power. |
+| `capitol_copier.py` | Scrapes Capitol Trades and copies qualifying politician buys/sells to Alpaca; also runs the dynamic exit engine (stop/trail/take-profit/pyramid). Modes: `--manage-only` (exits only), `--sync-state` (reconcile dedup state, no trades), `--dry-run`, `--rebalance`. |
+| `intraday_momentum.py` | Separate 4x-leveraged intraday day-trading strategy (behind the TUI `t` key). Off by default — see the `intraday.*` note in [Strategy Config Editor](#strategy-config-editor-n). |
 | `rebalance_top_n.py` | Rebalance helper used by the TUI to keep top performers, raise cash, or deploy idle cash. |
-| `config_io.py` | Shared config read/write helper for TUI schedule and Telegram channel settings. |
+| `config_io.py` | Shared config read/write helper — atomic per-key updates used by the TUI schedule/channel/strategy editors. |
+| `config_fields.py` | Declarative registry of every field the TUI strategy config editor (`n`) exposes: bounds, danger flags, descriptions. |
+| `sectors.py` | Ticker → sector map used for the copier's `target_sectors` whitelist and prune logic. |
 | `pool_manager.py` | Manages pool membership, trade sizing, consensus detection, and exposure limits. |
 | `politician_vetter.py` | Scores politicians and selects the active pool. |
 | `politician_history.py` | Tracks per-politician pool history and probation weeks. |
@@ -315,12 +463,17 @@ launchd (10-min heartbeat)
 ```
 Alpaca_Paper_Trader/
 ├── tui.py                    # interactive trading cockpit (Textual)
+├── trading_scheduler.py      # autonomous engine dispatcher (10-min heartbeat)
+├── swing_buyer.py            # autonomous RS-momentum + dip-add buy engine
+├── backtest_swing.py         # no-lookahead backtest for swing_buyer + exits
 ├── hermes_report.py          # report builder + chart/account helpers
 ├── report_scheduler.py       # config-driven daily report trigger
-├── capitol_copier.py         # smart money copy engine
+├── capitol_copier.py         # smart money copy engine + dynamic exit engine
 ├── intraday_momentum.py      # intraday RS day-trading strategy (4x)
 ├── rebalance_top_n.py        # TUI rebalance helper
 ├── config_io.py              # shared config persistence
+├── config_fields.py          # strategy config editor field registry (TUI 'n')
+├── sectors.py                # ticker → sector map (copier whitelist)
 ├── pool_manager.py           # pool membership + trade sizing
 ├── politician_vetter.py      # weekly pool scoring
 ├── politician_history.py     # pool history tracker

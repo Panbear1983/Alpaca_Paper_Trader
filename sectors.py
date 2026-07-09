@@ -28,6 +28,7 @@ TICKER_SECTOR = {
     "SMCI": "tech", "DELL": "tech", "HPQ": "tech", "WDC": "tech",
     "STX": "tech", "ANET": "tech", "PANW": "tech", "FTNT": "tech",
     "SNPS": "tech", "CDNS": "tech", "INTU": "tech", "IBM": "tech",
+    "COHR": "tech",   # Coherent — photonics/semiconductor lasers (was unmapped → wrongly "unknown")
 
     # ── Robotics / automation ──────────────────────────────────────────────
     "ISRG": "robotics", "ABB": "robotics", "ROK": "robotics",
@@ -57,6 +58,7 @@ TICKER_SECTOR = {
     "TT": "industrial", "CARR": "industrial", "JCI": "industrial",
     "LHX": "industrial", "TDG": "industrial", "GEHC": "industrial",
     "URI": "industrial", "FDX": "industrial", "WM": "industrial",
+    "RPM": "industrial",  # RPM International — specialty chemicals/coatings (was unmapped)
 
     # ── Financials ─────────────────────────────────────────────────────────
     "JPM": "finance", "BAC": "finance", "WFC": "finance", "C": "finance",
@@ -65,6 +67,7 @@ TICKER_SECTOR = {
     "TFC": "finance", "USB": "finance", "PNC": "finance", "NDAQ": "finance",
     "CME": "finance", "ICE": "finance", "SPGI": "finance", "MCO": "finance",
     "BRK": "finance", "BRKB": "finance", "APO": "finance",
+    "HOOD": "finance",  # Robinhood — brokerage/fintech (was unmapped → wrongly "unknown")
 
     # ── Healthcare ─────────────────────────────────────────────────────────
     "JNJ": "healthcare", "UNH": "healthcare", "PFE": "healthcare",
@@ -79,6 +82,8 @@ TICKER_SECTOR = {
     "TGT": "consumer", "MCD": "consumer", "SBUX": "consumer", "NKE": "consumer",
     "DIS": "consumer", "KO": "consumer", "PEP": "consumer", "CMG": "consumer",
     "BKNG": "consumer", "LULU": "consumer",
+    "KDP": "consumer",   # Keurig Dr Pepper — consumer staples (was unmapped)
+    "DHI": "consumer",   # D.R. Horton — homebuilder, GICS consumer discretionary (was unmapped)
 
     # ── Utilities / Telecom / Other ────────────────────────────────────────
     "DUK": "utilities", "SO": "utilities", "ARE": "reit", "ACN": "services",

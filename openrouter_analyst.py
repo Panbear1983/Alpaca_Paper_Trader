@@ -30,7 +30,7 @@ load_dotenv(_HERE / ".env")
 load_dotenv(Path.home() / ".hermes" / ".env", override=False)
 
 API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
-MODEL   = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.6").strip()
+MODEL   = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-opus-4.8").strip()
 URL     = "https://openrouter.ai/api/v1/chat/completions"
 
 SYSTEM = """You are a sharp, grounded financial analyst reviewing a paper-trading

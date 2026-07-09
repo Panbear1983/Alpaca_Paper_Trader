@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.alpacapapertrader.trading_scheduler</string>
+
+  <!-- Heartbeat: every 10 min. trading_scheduler.py self-gates to ET market
+       hours and dispatches: exit engine (every manage_every_minutes), swing
+       buyer (daily), disclosure copier (daily). NOTHING trades until the
+       config switches are flipped: swing.enabled and/or
+       capitol_copier.autorun_enabled in strategy_config.json.
+
+       Install (the go-live step — do this deliberately):
+         cp launchd/com.alpacapapertrader.trading_scheduler.plist ~/Library/LaunchAgents/
+         launchctl load ~/Library/LaunchAgents/com.alpacapapertrader.trading_scheduler.plist
+       Remove:
+         launchctl unload ~/Library/LaunchAgents/com.alpacapapertrader.trading_scheduler.plist -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/venv/bin/python3</string>
+    <string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/trading_scheduler.py</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader</string>
+
+  <key>StartInterval</key><integer>600</integer>
+
+  <key>StandardOutPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

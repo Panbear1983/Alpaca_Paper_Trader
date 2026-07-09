@@ -129,6 +129,38 @@ def fetch_orders_today_buys() -> list[dict]:
         return []
 
 
+def fetch_open_orders() -> list[dict]:
+    """All pending/queued orders not yet filled or cancelled."""
+    try:
+        orders = _get(f"{ALPACA_BASE}/orders", status="open", limit=200, direction="desc")
+        return orders if isinstance(orders, list) else []
+    except Exception as exc:
+        print(f"[warn] open_orders fetch: {exc}", file=sys.stderr)
+        return []
+
+
+def cancel_order(order_id: str) -> bool:
+    """Cancel a single open order by ID. Returns True on success."""
+    try:
+        r = requests.delete(f"{ALPACA_BASE}/orders/{order_id}",
+                            headers=HEADERS, timeout=10)
+        return r.status_code in (200, 204)
+    except Exception:
+        return False
+
+
+def cancel_all_orders() -> int:
+    """Cancel all open orders. Returns count cancelled."""
+    try:
+        r = requests.delete(f"{ALPACA_BASE}/orders", headers=HEADERS, timeout=10)
+        if r.status_code in (200, 207):
+            result = r.json()
+            return len(result) if isinstance(result, list) else 1
+        return 0
+    except Exception:
+        return 0
+
+
 def fetch_portfolio_history(period: str = "1M", timeframe: str = "1D") -> dict:
     return _get(f"{ALPACA_BASE}/account/portfolio/history",
                 period=period, timeframe=timeframe)
@@ -220,8 +252,10 @@ def fetch_bars_ranged(symbol: str, range_key: str = "1D") -> list[dict]:
 
 
 # Alpaca portfolio history period strings per range key
+# NOTE: /account/portfolio/history only accepts timeframe in
+# {1Min, 5Min, 15Min, 1H, 1D} — "30Min" (valid on the /bars endpoint) 422s here.
 _PH_PERIOD = {"1D": "1D", "1W": "1W", "1M": "1M", "3M": "3M", "6M": "6M", "1Y": "1A"}
-_PH_TF     = {"1D": "5Min", "1W": "30Min", "1M": "1D", "3M": "1D", "6M": "1D", "1Y": "1D"}
+_PH_TF     = {"1D": "5Min", "1W": "15Min", "1M": "1D", "3M": "1D", "6M": "1D", "1Y": "1D"}
 
 
 def fetch_portfolio_history_ranged(range_key: str = "1D") -> list[dict]:
@@ -246,7 +280,8 @@ def fetch_portfolio_history_ranged(range_key: str = "1D") -> list[dict]:
                          "o": o, "h": max(o, eq), "l": min(o, eq), "c": eq})
             prev_eq = eq
         return bars
-    except Exception:
+    except Exception as e:
+        print(f"[warn] portfolio_history({range_key}) fetch failed: {e}", file=sys.stderr)
         return []
 
 
@@ -324,8 +359,17 @@ def build_report(
     quotes:        dict,
     spy_pct:       float | None,
     local:         dict | None = None,
+    analyst:       str | None = None,
 ) -> str:
-    now_str  = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """Answer-first, phone-optimized report.
+
+    Order: headline (equity + day P&L) → analyst take → account → holdings
+    (trimmed to SYM/P&L/RET%) → today's trades → collapsed details (pool /
+    strategy / watchlist, one line each). Pass `analyst` to place the LLM
+    summary near the top; omit it to build the body used to generate that
+    summary.
+    """
+    now_str  = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     equity   = float(acct.get("equity",      0))
     last_eq  = float(acct.get("last_equity", equity))
     cash     = float(acct.get("cash",        0))
@@ -335,123 +379,64 @@ def build_report(
 
     L: list[str] = []
 
-    # ── header ─────────────────────────────────────────────────────────────
-    L.append("📊 *Alpaca Paper-Trading Report*")
-    L.append(f"_{now_str}_\n")
-
-    # ── 1. smart money pool (who we follow) ────────────────────────────────
-    if local:
-        pool_data   = local.get("pool", {})
-        copied_data = local.get("copied", {})
-        pool_members = pool_data.get("pool", [])
-        last_check   = copied_data.get("last_check", "")
-        stats        = copied_data.get("stats", {})
-        by_pol       = copied_data.get("by_politician", {})
-
-        # staleness in days
-        stale_days = None
-        stale_warn = ""
-        if last_check:
-            try:
-                lc = dt.datetime.fromisoformat(last_check.replace("Z", "+00:00"))
-                stale_days = (dt.datetime.now(dt.timezone.utc) - lc).days
-                stale_warn = f"  ⚠ {stale_days}d ago" if stale_days > 3 else f"  {stale_days}d ago"
-            except Exception:
-                pass
-
-        last_copy_fmt = last_check[:10] if last_check else "never"
-        total_buys  = stats.get("total_buys", 0)
-        total_sells = stats.get("total_sells", 0)
-
-        L.append("*Smart Money Pool*")
-        L.append(f"Last copy: `{last_copy_fmt}`{stale_warn}")
-        L.append(f"Total trades copied: `{total_buys}B / {total_sells}S`")
-
-        if pool_members:
-            L.append("```")
-            L.append(f"{'':2} {'Name':<11} {'P':3} {'WR':>4} {'Wt':>4} {'B/S':>5}")
-            L.append("─" * 33)
-            for p in pool_members:
-                pid   = p.get("politician_id", "")
-                name, party = POLITICIAN_NAMES.get(pid, (pid[:10], "?"))
-                wr    = (p.get("metrics") or {}).get("win_rate", 0) * 100
-                wt    = p.get("weight", 0) * 100
-                pol_b = by_pol.get(pid, {}).get("buys", 0)
-                pol_s = by_pol.get(pid, {}).get("sells", 0)
-                prob  = " P" if p.get("is_probationary") else "  "
-                L.append(
-                    f"#{p['rank']}{prob} {name:<11} {party:3} {wr:>3.0f}% {wt:>3.0f}% {pol_b:>2}B/{pol_s}S"
-                )
-            L.append("─" * 33)
-            L.append("P = on probation")
-            L.append("```")
-        L.append("")
-
-    # ── 2. account summary ─────────────────────────────────────────────────
-    L.append("*Account*")
-    L.append(f"• Equity:        `{_m(equity)}`")
-    L.append(f"• Cash:          `{_m(cash)}`")
-    L.append(f"• Buying Power:  `{_m(bp)}`")
-    L.append(f"• Day P&L:       `{_s(day_pnl)}  ({_p(day_pct)})`")
+    # ── header + headline (the answer, first screen) ───────────────────────
+    L.append("📊 *Alpaca Paper Report*")
+    L.append(f"_{now_str}_")
+    arrow = "🟢" if day_pnl >= 0 else "🔴"
+    L.append(f"*Equity {_m(equity)}*")
+    L.append(f"{arrow} Day {_s(day_pnl)}  ({_p(day_pct)})")
     if spy_pct is not None:
         alpha = day_pct - spy_pct
-        L.append(f"• SPY today:     `{_p(spy_pct)}`   alpha vs SPY: `{_p(alpha)}`")
+        L.append(f"SPY {_p(spy_pct)}  ·  alpha {_p(alpha)}")
     L.append("")
 
-    # ── 3. portfolio holdings ──────────────────────────────────────────────
+    # ── analyst take (the "if you read one thing") ─────────────────────────
+    if analyst:
+        L.append(f"💬 {analyst}")
+        L.append("")
+
+    # ── account snapshot (compact) ─────────────────────────────────────────
+    L.append(f"*Account*  Cash {_m(cash)}  ·  BP {_m(bp)}")
+    L.append("")
+
+    # ── holdings — trimmed to SYM / P&L$ / RET%, winners top ───────────────
     if positions:
-        # Alpaca provides cost_basis = avg_entry_price × qty (accurate for all fills)
-        # unrealized_pl  = market_value − cost_basis
-        # unrealized_plpc = unrealized_pl / cost_basis  (decimal)
         positions_sorted = sorted(
             positions,
             key=lambda p: float(p.get("unrealized_pl", 0)),
             reverse=True,
         )
-
         total_cost   = sum(float(p.get("cost_basis",   0)) for p in positions)
         total_mktval = sum(float(p.get("market_value", 0)) for p in positions)
         total_unreal = total_mktval - total_cost
         total_pct    = (total_unreal / total_cost * 100) if total_cost else 0.0
 
-        L.append(f"*Holdings ({len(positions)} positions)*")
+        L.append(f"*Holdings ({len(positions)})*")
         L.append("```")
-        # Column headers
-        L.append(f"{'SYM':<6} {'QTY':>8} {'AVG':>9} {'PRICE':>9} {'P&L':>10} {'%':>8}")
-        L.append("─" * 56)
+        L.append(f"{'SYM':<6}{'P&L $':>10} {'RET%':>8}")
+        L.append("─" * 25)
         for p in positions_sorted:
             sym   = p["symbol"]
-            qty   = float(p.get("qty",              0))
-            avg   = float(p.get("avg_entry_price",  0))
-            cur   = float(p.get("current_price",    0))
-            upl   = float(p.get("unrealized_pl",    0))
-            uplpc = float(p.get("unrealized_plpc",  0)) * 100
-            arrow = "▲" if upl >= 0 else "▼"
-            L.append(
-                f"{sym:<6} {_qty(qty):>8} ${avg:>8.2f} ${cur:>8.2f}"
-                f" {upl:>+9.2f} {arrow}{abs(uplpc):>6.2f}%"
-            )
-        L.append("─" * 56)
+            upl   = float(p.get("unrealized_pl",   0))
+            uplpc = float(p.get("unrealized_plpc", 0)) * 100
+            a     = "▲" if upl >= 0 else "▼"
+            L.append(f"{sym:<6}{upl:>+10.0f} {a}{abs(uplpc):>6.1f}%")
+        L.append("─" * 25)
         oa = "▲" if total_unreal >= 0 else "▼"
-        L.append(
-            f"{'TOTAL':<6} {'':>8} {'':>9} {_m(total_mktval):>9}"
-            f" {total_unreal:>+9.2f} {oa}{abs(total_pct):>6.2f}%"
-        )
+        L.append(f"{'TOTAL':<6}{total_unreal:>+10.0f} {oa}{abs(total_pct):>6.1f}%")
         L.append("```")
-        L.append(f"• Cost basis:   `{_m(total_cost)}`")
-        L.append(f"• Market value: `{_m(total_mktval)}`")
-        L.append(f"• Unrealized:   `{_s(total_unreal)}  ({_p(total_pct)})`")
+        L.append(f"Value {_m(total_mktval)}  ·  Cost {_m(total_cost)}")
         L.append("")
     else:
-        L.append("*Holdings*\n_(no open positions)_\n")
+        L.append("*Holdings*  _(none)_\n")
 
-    # ── 3. today's purchases ───────────────────────────────────────────────
-    today_label = dt.datetime.now(ET).strftime("%Y-%m-%d")
-    L.append(f"*Purchases — {today_label}*")
+    # ── today's trades (compact) ───────────────────────────────────────────
+    today_label = dt.datetime.now(ET).strftime("%b %-d")
     if today_buys:
+        L.append(f"*Trades — {today_label}*")
         L.append("```")
-        L.append(f"{'TIME (ET)':>8} {'SYM':<6} {'QTY':>8} {'@ PRICE':>9} {'COST':>10}")
-        L.append("─" * 46)
+        L.append(f"{'ET':>5} {'SYM':<6}{'$ COST':>10}")
+        L.append("─" * 23)
         day_spend = 0.0
         for o in today_buys:
             sym     = o.get("symbol", "?")
@@ -459,35 +444,28 @@ def build_report(
             fill_px = float(o.get("filled_avg_price") or 0)
             cost    = qty * fill_px
             day_spend += cost
-            # convert UTC fill time to ET
             raw_t = o.get("filled_at") or ""
             try:
                 utc_t = dt.datetime.fromisoformat(raw_t.replace("Z", "+00:00"))
                 et_t  = utc_t.astimezone(ET).strftime("%H:%M")
             except Exception:
                 et_t = raw_t[11:16] if len(raw_t) >= 16 else "—"
-            L.append(
-                f"{et_t:>8} {sym:<6} {_qty(qty):>8} ${fill_px:>8.2f} ${cost:>9.2f}"
-            )
-        L.append("─" * 46)
-        L.append(f"{'':>8} {'TOTAL':<6} {'':>8} {'':>9} ${day_spend:>9.2f}")
+            L.append(f"{et_t:>5} {sym:<6}{cost:>10.0f}")
+        L.append("─" * 23)
+        L.append(f"{'':>5} {'TOTAL':<6}{day_spend:>10.0f}")
         L.append("```")
     else:
-        L.append("_(no buys filled today)_")
+        L.append(f"*Trades — {today_label}*  _(none)_")
     L.append("")
 
-    # ── 5. strategy status ─────────────────────────────────────────────────
+    # ── details (collapsed: pool / strategy / watchlist, one line each) ────
+    L.append("──── details ────")
+
     if local:
-        cfg         = local.get("config", {})
-        pool_cfg    = cfg.get("pool", {})
-        cc_cfg      = cfg.get("capitol_copier", {})
         copied_data = local.get("copied", {})
+        pool_members = (local.get("pool", {}) or {}).get("pool", [])
+        last_check   = copied_data.get("last_check", "")
 
-        L.append("*Strategy Status*")
-        L.append("```")
-
-        # Capitol Copier
-        last_check = copied_data.get("last_check", "")
         stale_days = None
         if last_check:
             try:
@@ -495,56 +473,47 @@ def build_report(
                 stale_days = (dt.datetime.now(dt.timezone.utc) - lc).days
             except Exception:
                 pass
+        copy_ago = f"copy {stale_days}d ago" if stale_days is not None else "copy never"
 
-        budget   = pool_cfg.get("daily_budget_usd", "?")
+        # Pool — one line: Name Wt% (ᴾ if probation)
+        if pool_members:
+            bits = []
+            for p in pool_members:
+                pid  = p.get("politician_id", "")
+                name = POLITICIAN_NAMES.get(pid, (pid[:8], "?"))[0]
+                wt   = p.get("weight", 0) * 100
+                prob = "ᴾ" if p.get("is_probationary") else ""
+                bits.append(f"{name} {wt:.0f}%{prob}")
+            L.append(f"*Pool*  {' · '.join(bits)} · {copy_ago}")
+
+        # Strategy — one line
+        cfg      = local.get("config", {})
+        pool_cfg = cfg.get("pool", {})
+        cc_cfg   = cfg.get("capitol_copier", {})
+        dx       = cfg.get("dynamic_exits") or {}
         cap_pct  = pool_cfg.get("max_total_exposure_pct", 0) * 100
-        boost    = pool_cfg.get("consensus_boost_multiplier", "?")
-        sectors  = cc_cfg.get("target_sectors", [])
-        dx       = (cfg.get("dynamic_exits") or {})
-        L.append("CAPITOL COPIER (aggressive)")
-        L.append(f"  Budget   ${budget}/day")
-        L.append(f"  Exp cap  {cap_pct:.0f}% of equity")
+        sectors  = ",".join(cc_cfg.get("target_sectors", []) or [])
+        run_st   = (f"STALE {stale_days}d" if (stale_days or 0) > 3
+                    else f"OK {stale_days}d" if stale_days is not None else "?")
+        strat = f"*Capitol*  {run_st} · exp {cap_pct:.0f}%"
         if sectors:
-            L.append(f"  Sectors  {','.join(sectors)}")
-        if stale_days is not None:
-            runner_status = f"STALE {stale_days}d" if stale_days > 3 else f"OK ({stale_days}d ago)"
-            L.append(f"  Status   {runner_status}")
-        L.append("  Logic    copy on-target disclosures,")
-        L.append("           size by rank weight,")
-        L.append(f"           {boost}x boost if consensus")
+            strat += f" · {sectors}"
         if dx.get("enabled"):
             sl = dx.get("stop_loss_pct", 0) * 100
-            tt = dx.get("trail_trigger_pct", 0) * 100
-            tg_ = dx.get("trail_giveback_pct", 0) * 100
-            L.append(f"  Exits    stop -{sl:.0f}%, trail +{tt:.0f}%/-{tg_:.0f}%,")
-            L.append("           take-profits + pyramid")
-            maxh = dx.get("max_holdings")
-            if dx.get("prune_off_target") or maxh:
-                bits = []
-                if dx.get("prune_off_target"): bits.append("sectors-only")
-                if maxh: bits.append(f"max {maxh} names")
-                L.append(f"  Concentr {', '.join(bits)}")
-        L.append("")
-        L.append("```")
-        L.append("")
+            strat += f" · stop -{sl:.0f}%"
+        L.append(strat)
 
-    # ── 6. watchlist ───────────────────────────────────────────────────────
-    L.append("*Watchlist*")
+    # Watchlist — one line of mids
     if isinstance(quotes, dict) and "_error" in quotes:
-        L.append(f"_quotes unavailable: {quotes['_error']}_")
-    elif not quotes:
-        L.append("_(no quotes)_")
-    else:
-        L.append("```")
+        L.append(f"*Watch*  _unavailable: {quotes['_error']}_")
+    elif quotes:
+        wl = []
         for sym in WATCHLIST:
-            q       = quotes.get(sym) or {}
+            q = quotes.get(sym) or {}
             bid, ask = q.get("bp"), q.get("ap")
-            mid     = ((bid + ask) / 2) if (bid and ask) else None
-            mid_s   = f"{mid:.2f}" if mid else "—"
-            bid_s   = f"{bid:.2f}" if bid else "—"
-            ask_s   = f"{ask:.2f}" if ask else "—"
-            L.append(f"{sym:<6}  mid {mid_s:>9}  bid {bid_s:>9}  ask {ask_s:>9}")
-        L.append("```")
+            mid = ((bid + ask) / 2) if (bid and ask) else None
+            wl.append(f"{sym} {mid:.2f}" if mid else f"{sym} —")
+        L.append(f"*Watch*  {' · '.join(wl)}")
 
     return "\n".join(L)
 
@@ -555,11 +524,20 @@ def chart_equity(history: dict, out: Path) -> Path | None:
     ts = history.get("timestamp") or []
     if not eq or not ts:
         return None
-    times = [dt.datetime.fromtimestamp(t) for t in ts]
+    # Alpaca sends None for equity gaps (weekends / market-closed / no-data
+    # spans). matplotlib's fill_between runs np.isfinite and raises TypeError on
+    # None, so drop any (timestamp, equity) pair whose equity isn't a real
+    # number — keeping the two series aligned. Without this the daily report's
+    # equity chart silently fails whenever the window contains a gap.
+    pairs = [(t, e) for t, e in zip(ts, eq) if isinstance(e, (int, float))]
+    if not pairs:
+        return None
+    times = [dt.datetime.fromtimestamp(t) for t, _ in pairs]
+    eq = [e for _, e in pairs]
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(times, eq, linewidth=1.8, color="#1f77b4")
     ax.fill_between(times, eq, alpha=0.12, color="#1f77b4")
-    ax.set_title("Equity — last 30 days")
+    ax.set_title("Equity — today (1D)")
     ax.set_ylabel("USD")
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
     ax.grid(True, alpha=0.3)
@@ -574,7 +552,11 @@ def chart_allocation(positions: list[dict], out: Path) -> Path | None:
         return None
     sizes  = [abs(float(p.get("market_value", 0))) for p in positions]
     labels = [p["symbol"] for p in positions]
-    total  = sum(sizes) or 1
+    total  = sum(sizes)
+    # matplotlib's pie() raises "All wedge sizes are zero" if every slice is 0
+    # (e.g. momentarily after a flatten, or a data blip). Nothing to chart.
+    if total <= 0:
+        return None
     # suppress labels on tiny slices to keep the chart readable
     disp_labels = [lbl if (sz / total) > 0.025 else "" for lbl, sz in zip(labels, sizes)]
     fig, ax = plt.subplots(figsize=(7, 7))
@@ -652,29 +634,34 @@ def run_report(push: bool = True, channel: str | None = None, log=print) -> dict
     log("[3/5] Fetching today's buy orders...")
     today_buys = fetch_orders_today_buys()
     log("[4/5] Fetching history, quotes, SPY...")
-    history  = fetch_portfolio_history()
+    history  = fetch_portfolio_history(period="1D", timeframe="5Min")
     quotes   = fetch_quotes(WATCHLIST)
     spy_pct  = fetch_spy_day_pct()
     log("[5/5] Loading local state + building report...")
     local = load_local_state()
 
-    report = build_report(acct, positions, today_buys, quotes, spy_pct, local)
+    # Build the data body first (no analyst), feed it to the LLM, then rebuild
+    # with the summary placed near the top (answer-first layout).
+    body = build_report(acct, positions, today_buys, quotes, spy_pct, local)
 
     # ── Analyst Take — grounded LLM summary via OpenRouter (optional) ──────
+    analyst = None
     try:
         import openrouter_analyst
-        summary = openrouter_analyst.summarize(report)
+        summary = openrouter_analyst.summarize(body)
         if summary and not summary.startswith("[analyst error"):
-            report += f"\n\n*Analyst Take*\n{summary}"
+            analyst = summary
             log(f"[analyst] summary added ({openrouter_analyst.MODEL})")
         elif summary:  # error string — note it, don't break the report
-            report += "\n\n_Analyst summary unavailable this run._"
             log(f"[analyst] {summary}")
         else:
             log("[analyst] no OPENROUTER_API_KEY set — skipping summary")
     except Exception as e:
         log(f"[analyst] skipped: {e}")
 
+    report = (build_report(acct, positions, today_buys, quotes, spy_pct, local,
+                           analyst=analyst)
+              if analyst else body)
     report += "\n\n_Alpaca Paper Trader · auto-report at NYSE close_"
     md_path.write_text(report, encoding="utf-8")
 
@@ -688,7 +675,7 @@ def run_report(push: bool = True, channel: str | None = None, log=print) -> dict
         tg_send_text(report, channel=channel)
         if eq_done:
             log("[tg] Sending equity chart...")
-            tg_send_photo(eq_png, "Equity — last 30 days", channel=channel)
+            tg_send_photo(eq_png, "Equity — today (1D)", channel=channel)
         if alloc_done:
             log("[tg] Sending allocation chart...")
             tg_send_photo(alloc_png, "Allocation by market value", channel=channel)

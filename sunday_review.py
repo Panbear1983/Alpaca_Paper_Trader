@@ -328,7 +328,12 @@ def rebalance_pool_weights(cfg):
 
 
 def adjust_tsla(cfg, metrics, changes):
-    tsla = cfg["tsla"]
+    # TSLA strategy was retired in the v3 pivot — the "tsla" config block no
+    # longer exists. Without this guard the whole weekly review crashed with
+    # KeyError before saving anything (the self-improvement loop was dead).
+    tsla = cfg.get("tsla")
+    if not tsla:
+        return
     rev  = cfg["review"]
     m    = metrics["tsla_strategy"]
 

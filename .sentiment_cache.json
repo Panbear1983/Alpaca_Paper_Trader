@@ -6,5 +6,13 @@
     "reasoning": "The recent headlines about GOOGL are mixed in sentiment, with some positive developments like the Data Center Innovation Initiative and Missouri AI investment, but also caution around Europe's debate ",
     "n_headlines": 10,
     "checked_at": "2026-05-27T09:46:32.619010+00:00"
+  },
+  "LRCX": {
+    "score": 3,
+    "multiplier": 1.0,
+    "flag": "",
+    "reasoning": "The headlines show mixed sentiment about Lam Research's stock performance and AI demand, with some articles suggesting caution but not indicating clear bearish or bullish trends.",
+    "n_headlines": 10,
+    "checked_at": "2026-07-02T14:34:45.369621+00:00"
   }
 }

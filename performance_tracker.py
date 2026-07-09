@@ -123,8 +123,13 @@ def pair_trades(orders):
                 ).days if buy["entry_date"] and sell_date else 0
                 pnl_usd = (sell_price - buy["entry_price"]) * matched_qty
 
+                # Attribution: TSLA/AAPL are legacy holdouts; EVERYTHING else on
+                # this account is the swing book (capitol copies + swing_buyer).
+                # The old hardcoded CAPITOL_COPIER_TICKERS set went stale and
+                # tagged the whole current book "other", starving
+                # sunday_review's adjustment rules of data.
                 strategy = "tsla_strategy" if symbol == "TSLA" else \
-                           "capitol_copier" if symbol in CAPITOL_COPIER_TICKERS else "other"
+                           "other" if symbol == "AAPL" else "capitol_copier"
 
                 closed.append({
                     "symbol":       symbol,

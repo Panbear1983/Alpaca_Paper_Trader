@@ -80,7 +80,10 @@ def send(message, parse_mode="Markdown", silent=False, channel=None):
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
-        return r.status_code == 200
+        if r.status_code != 200:
+            print(f"[telegram] API error {r.status_code}: {r.text}")
+            return False
+        return True
     except Exception as e:
         print(f"[telegram] send failed: {e}")
         return False
