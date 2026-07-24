@@ -191,7 +191,9 @@ def check_alpaca_fills(state):
             params={"status": "filled", "limit": 50, "direction": "desc"},
             timeout=10,
         )
-        orders = r.json() if r.status_code == 200 else []
+        if r.status_code != 200:
+            return 0
+        orders = r.json()
     except Exception:
         return 0
 
