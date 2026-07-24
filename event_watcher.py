@@ -13,6 +13,7 @@ re-notifying on already-seen events.
 Notifications go via telegram_notifier.py — silent fail if Telegram not configured.
 """
 
+import fcntl
 import os, json, requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -20,6 +21,30 @@ from dotenv import load_dotenv
 import telegram_notifier as tg
 
 load_dotenv()
+
+# Single-instance guard: this launchd job fires every 60s (StartInterval),
+# but has no minimum runtime guarantee. If a run is still mid-flight when the
+# next one fires (slow Alpaca API, a DNS retry, etc.) two processes race on
+# reading/writing .event_watcher_state.json with no coordination — each one
+# sees the same "new" fills against a stale last_filled_orders list, both
+# notify, and the loser's save is clobbered, so the same fills get reported
+# again next cycle. Confirmed happening in .logs/event_watcher.out.log
+# (identical "50 fills" notifications repeating for 40000+ log lines).
+_LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         ".event_watcher.lock")
+
+
+def _acquire_singleton_lock():
+    lock_fh = open(_LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("[event_watcher] another instance is already running "
+              f"(lock held on {_LOCK_PATH}) — exiting instead of racing it.")
+        raise SystemExit(0)   # not an error condition — just skip this tick
+    lock_fh.write(str(os.getpid()))
+    lock_fh.flush()
+    return lock_fh   # caller must keep this open for the process lifetime
 
 API_KEY    = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
@@ -31,7 +56,11 @@ STATE_FILE = os.path.join(ROOT, ".event_watcher_state.json")
 
 PERF_LOG   = os.path.join(ROOT, "performance_log.json")
 POOL_STATE = os.path.join(ROOT, "pool_state.json")
-COPIED     = os.path.join(ROOT, ".copied_trades.json")
+try:        # per-wallet split: watch the DEFAULT wallet's dedup state
+    import strategies
+    COPIED = strategies.state_path(".copied_trades.json")
+except Exception:
+    COPIED = os.path.join(ROOT, ".copied_trades.json")
 
 
 def load_watcher_state():
@@ -206,13 +235,21 @@ def check_alpaca_fills(state):
 # ── Main runner ─────────────────────────────────────────────────────────────
 
 def run():
+    _lock = _acquire_singleton_lock()   # kept open for the process lifetime
     state = load_watcher_state()
     first = state.get("first_run", True)
 
     closed = check_new_closed_trades(state)
+    if closed > 0: save_watcher_state(state)
+    
     pool   = check_pool_changes(state)
+    if pool > 0: save_watcher_state(state)
+    
     copied = check_copied_trades(state)
+    if copied > 0: save_watcher_state(state)
+    
     fills  = check_alpaca_fills(state)
+    if fills > 0: save_watcher_state(state)
 
     if first:
         # First run: silently seed state, then exit
@@ -221,7 +258,7 @@ def run():
         print(f"[event_watcher] first run — state seeded (silent)")
         return
 
-    save_watcher_state(state)
+    save_watcher_state(state) # Final save to update last_run_at timestamp
     total = closed + pool + copied + fills
     if total > 0:
         print(f"[event_watcher] notified: {closed} closed, {pool} pool, "
