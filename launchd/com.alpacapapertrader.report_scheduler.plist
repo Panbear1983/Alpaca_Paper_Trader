@@ -11,15 +11,15 @@
   <key>ProgramArguments</key>
   <array>
     <string>/Library/Frameworks/Python.framework/Versions/3.11/bin/python3</string>
-    <string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/report_scheduler.py</string>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/report_scheduler.py</string>
   </array>
 
-  <key>WorkingDirectory</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader</string>
+  <key>WorkingDirectory</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader</string>
 
   <key>StartInterval</key><integer>600</integer>
 
-  <key>StandardOutPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/report_scheduler.out.log</string>
-  <key>StandardErrorPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/report_scheduler.err.log</string>
+  <key>StandardOutPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/report_scheduler.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/report_scheduler.err.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>

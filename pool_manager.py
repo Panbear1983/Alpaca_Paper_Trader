@@ -22,8 +22,9 @@ POOL_FILE   = os.path.join(os.path.dirname(__file__), "pool_state.json")
 
 
 def load_config():
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
+    """Global app config ∪ the ACTIVE wallet's strategy file."""
+    import strategies
+    return strategies.load_merged()
 
 
 def get_pool():

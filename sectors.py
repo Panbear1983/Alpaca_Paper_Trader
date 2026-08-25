@@ -25,6 +25,7 @@ TICKER_SECTOR = {
     "MRVL": "tech", "ASML": "tech", "LRCX": "tech", "KLAC": "tech",
     "AMAT": "tech", "ON": "tech", "MCHP": "tech", "NXPI": "tech",
     "ADI": "tech", "SWKS": "tech", "MPWR": "tech", "ARM": "tech",
+    "TSM": "tech",
     "SMCI": "tech", "DELL": "tech", "HPQ": "tech", "WDC": "tech",
     "STX": "tech", "ANET": "tech", "PANW": "tech", "FTNT": "tech",
     "SNPS": "tech", "CDNS": "tech", "INTU": "tech", "IBM": "tech",

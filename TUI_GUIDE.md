@@ -7,7 +7,7 @@ tick, place manual buy/sell orders).
 ## Launch
 
 ```bash
-cd /Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader
+cd /Users/peter/GitHub/Alpaca_Paper_Trader
 source venv/bin/activate
 python3 tui.py
 ```

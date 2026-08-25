@@ -32,7 +32,7 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]o[/b] pf-chart   "
         "[b]w[/b] timeframe   [b]v[/b] positions/orders   "
         "[b]g[/b] sched   [b]m[/b] channels   [b]n[/b] strategy   [b]k[/b] wallet   "
-        "[b]W[/b] compare   [b]h[/b] manual   [b]a[/b] arm/disarm   [b]l[/b] 中文   [b]q[/b] quit"
+        "[b]Shift+W[/b] compare   [b]h[/b] manual   [b]a[/b] arm/disarm   [b]l[/b] 中文   [b]q[/b] quit"
         "   •   "
         "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
         "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance   "
@@ -41,7 +41,7 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[b]r[/b] 更新   [b]d[/b] 模擬排名   [b]p[/b] 推送報告   [b]o[/b] 投組圖   "
         "[b]w[/b] 時間範圍   [b]v[/b] 持倉/掛單   "
         "[b]g[/b] 排程   [b]m[/b] 頻道   [b]n[/b] 策略設定   [b]k[/b] 錢包   "
-        "[b]W[/b] 錢包比較   [b]h[/b] 手冊   [b]a[/b] 上鎖/解鎖   [b]l[/b] English   [b]q[/b] 離開"
+        "[b]Shift+W[/b] 錢包比較   [b]h[/b] 手冊   [b]a[/b] 上鎖/解鎖   [b]l[/b] English   [b]q[/b] 離開"
         "   •   "
         "[b]f[/b] 全部平倉   [b]t[/b] 盤中執行   [b]c[/b] 國會跟單   "
         "[b]b[/b] 買入   [b]s[/b] 賣出   [b]e[/b] 再平衡   "
@@ -77,6 +77,8 @@ _TABLE: dict[str, tuple[str, str]] = {
         "總損益 [{tpc}]{totalpl} ({totalpct}%)[/]   "
         "曝險 [b]{lev}x[/]",
     ),
+    "sum.split": ("[dim]Realized[/] [{rc}]{rpl}[/] [dim]· Unrealized[/] [{uc}]{upl}[/]",
+                  "[dim]已實現[/] [{rc}]{rpl}[/] [dim]· 未實現[/] [{uc}]{upl}[/]"),
     "badge.market_open": ("[b black on green] MARKET OPEN [/]",
                           "[b black on green] 市場開盤中 [/]"),
     "badge.market_closed": (
@@ -109,6 +111,11 @@ _TABLE: dict[str, tuple[str, str]] = {
         "買入 [b]${amt}[/] → 現金 [b]$0.00[/] [yellow]（+${over} 動用融資/購買力）[/]"),
     "buy.after": ("buy [b]${amt}[/] → cash after [b]${after}[/]",
                   "買入 [b]${amt}[/] → 剩餘現金 [b]${after}[/]"),
+    "buy.err_sym": ("[red]enter a symbol[/]", "[red]請輸入代號[/]"),
+    "buy.err_amt": ("[red]enter a positive USD amount (e.g. 1000, or 'all')[/]",
+                    "[red]請輸入正的美元金額（例如 1000，或 'all'）[/]"),
+    "log.buy_aborted": ("[dim]buy cancelled — NO order was sent[/]",
+                        "[dim]已取消買入 — 未送出任何委託[/]"),
 
     # ── sell modal ────────────────────────────────────────────────────────────
     "sell.title": ("SELL {sym} — amount", "賣出 {sym} — 金額"),
@@ -182,10 +189,10 @@ _TABLE: dict[str, tuple[str, str]] = {
     "cfg.col.value": ("VALUE", "數值"),
     "cfg.col.range": ("RANGE", "範圍"),
     "cfg.head": (
-        "[b]Strategy tunables[/] — live-editing strategy_config.json\n"
+        "[b]Strategy tunables — {wallet}[/] — live-editing {file}\n"
         "[dim]last: manage {man} · swing {swing} · copy {copy} · "
         "intraday: LOCKED (edit JSON only — 't' key trades 4x if enabled)[/]",
-        "[b]策略參數[/] — 即時編輯 strategy_config.json\n"
+        "[b]策略參數 — {wallet}[/] — 即時編輯 {file}\n"
         "[dim]最近：倉位管理 {man} · 波段 {swing} · 跟單 {copy} · "
         "盤中：鎖定（僅可手動改 JSON — 啟用後 't' 鍵將以 4 倍槓桿交易）[/]"),
     "cfg.hint": (
@@ -229,13 +236,14 @@ _TABLE: dict[str, tuple[str, str]] = {
     # ── wallet modals ─────────────────────────────────────────────────────────
     "wal.title": (
         "[b]Switch wallet[/] — the account the TUI views + acts on\n"
-        "[dim]Enter=switch · e=rename · Esc=close · "
-        "Manual actions target the active wallet; autonomous engines "
-        "still trade the default (.env) account.[/]",
+        "[dim]Enter=switch · e=rename · a=add new · Esc=close · "
+        "Each wallet has its own strategy file; engines trade a wallet only "
+        "while its own master switches are ON.[/]",
         "[b]切換錢包[/] — TUI 檢視與操作的帳戶\n"
-        "[dim]Enter=切換 · e=重新命名 · Esc=關閉 · "
-        "手動操作以使用中的錢包為目標；自動引擎仍交易預設（.env）帳戶。[/]"),
+        "[dim]Enter=切換 · e=重新命名 · a=新增 · Esc=關閉 · "
+        "每個錢包有獨立策略檔；引擎僅在該錢包的主開關開啟時才會交易。[/]"),
     "wal.col.wallet": ("WALLET", "錢包"),
+    "wal.col.account": ("ACCOUNT", "帳號"),
     "wal.col.status": ("STATUS", "狀態"),
     "wal.active": ("active", "使用中"),
     "wal.ready": ("ready", "可用"),
@@ -249,6 +257,27 @@ _TABLE: dict[str, tuple[str, str]] = {
                    "[dim]僅變更顯示名稱 — 憑證/.env 不受影響。[/]"),
     "wren.ph": ("new wallet name", "新錢包名稱"),
     "wren.err_empty": ("[red]name cannot be empty[/]", "[red]名稱不可為空[/]"),
+    "btn.add": ("Add", "新增"),
+    "wadd.title": (
+        "Add a NEW wallet — paste its Alpaca PAPER API keys\n"
+        "[dim]Generate keys for that paper account on app.alpaca.markets. "
+        "They are validated live against /v2/account BEFORE anything is "
+        "saved; on success the account number + equity are shown so a "
+        "wrong-account keypair is caught immediately. Keys go into .env "
+        "only; the new wallet starts with every engine switch OFF.[/]",
+        "新增錢包 — 貼上該 Alpaca 模擬帳戶的 API 金鑰\n"
+        "[dim]請在 app.alpaca.markets 為該模擬帳戶產生金鑰。儲存前會先向 "
+        "/v2/account 即時驗證；成功後會顯示帳號與權益，貼錯帳戶的金鑰可立即"
+        "發現。金鑰僅存於 .env；新錢包的所有引擎開關預設為關閉。[/]"),
+    "wadd.name_ph": ("wallet name e.g. Mid Risk", "錢包名稱，例如 Mid Risk"),
+    "wadd.key_ph": ("API key (PK…)", "API 金鑰（PK…）"),
+    "wadd.secret_ph": ("API secret", "API 密鑰"),
+    "wadd.err_all": ("[red]name, key and secret are all required[/]",
+                     "[red]名稱、金鑰與密鑰皆為必填[/]"),
+    "wal.validating": ("[yellow]validating keys against Alpaca…[/]",
+                       "[yellow]正在向 Alpaca 驗證金鑰…[/]"),
+    "wal.added": ("[green]added '{name}' — {info}[/]",
+                  "[green]已新增 '{name}' — {info}[/]"),
 
     # ── boot / status logs ────────────────────────────────────────────────────
     "log.booted": (
@@ -259,8 +288,8 @@ _TABLE: dict[str, tuple[str, str]] = {
                   "[dim]{status} — 'p' 推送報告，'g' 編輯排程，'m' 頻道[/]"),
     "state.on": ("on", "開"),
     "state.off": ("off", "關"),
-    "rs.on": ("auto-report: ON @ {time} ET ({scope})",
-              "自動報告：開啟 @ 美東 {time}（{scope}）"),
+    "rs.on": ("auto-report: ON @ {time} ET ({scope}) — TUI-scheduled",
+              "自動報告：開啟 @ 美東 {time}（{scope}）— TUI 排程"),
     "rs.off": ("auto-report: OFF", "自動報告：關閉"),
     "rs.unknown": ("auto-report: ?", "自動報告：？"),
     "rs.weekdays": ("weekdays", "平日"),
@@ -268,6 +297,11 @@ _TABLE: dict[str, tuple[str, str]] = {
     "log.tg_failed": ("[yellow]telegram notify failed: {e}[/]",
                       "[yellow]Telegram 通知失敗：{e}[/]"),
     "log.lang": ("[cyan]language → {lang}[/]", "[cyan]語言 → {lang}[/]"),
+    "log.code_stale": (
+        "[b yellow]⚠ code updated on disk — THIS WINDOW RUNS OLD CODE. "
+        "Press q and relaunch (./tui.sh) before trading.[/]",
+        "[b yellow]⚠ 程式碼已更新 — 此視窗執行的是舊版程式。"
+        "交易前請按 q 離開並重新啟動（./tui.sh）。[/]"),
 
     # ── config editors' logs ──────────────────────────────────────────────────
     "log.cfg_read_err": ("[red]config read error: {e}[/]",
@@ -293,9 +327,10 @@ _TABLE: dict[str, tuple[str, str]] = {
     "log.wallet_switched": ("[b cyan]switched → wallet '{name}'[/] (disarmed; refreshing…)",
                             "[b cyan]已切換 → 錢包 '{name}'[/]（已上鎖；更新中…）"),
     "log.wallet_engines": (
-        "[yellow]⚠ autonomous engines still trade the default ('{name}') account "
-        "— this switch is view + manual only[/]",
-        "[yellow]⚠ 自動引擎仍交易預設（'{name}'）帳戶 — 此切換僅影響檢視與手動操作[/]"),
+        "[yellow]⚠ engines follow each wallet's own strategy file — '{name}' "
+        "trades autonomously only while its master switches are ON ('n')[/]",
+        "[yellow]⚠ 自動引擎依各錢包自己的策略檔運作 — '{name}' 僅在其主開關"
+        "開啟時才會自動交易（按 'n' 檢視）[/]"),
 
     # ── arm / refresh logs ────────────────────────────────────────────────────
     "log.arm_closed": (
@@ -319,6 +354,8 @@ _TABLE: dict[str, tuple[str, str]] = {
                  "[dim]找不到 {sym} 的公司資料。[/]"),
     "bio.nodesc": ("[dim](no description available)[/]", "[dim]（無公司描述）[/]"),
     "bio.translating": ("(translating…)", "（翻譯中…）"),
+    "bio.perf": ("[b]PRICE[/] {px}   [b]1M[/] {m}   [b]1Y[/] {y}   [b]ALL[/] {a}",
+                 "[b]現價[/] {px}   [b]近一月[/] {m}   [b]近一年[/] {y}   [b]全期間[/] {a}"),
 
     # ── chart ─────────────────────────────────────────────────────────────────
     "chart.pf": ("PORTFOLIO (equity)", "投資組合（權益）"),
@@ -370,6 +407,25 @@ _TABLE: dict[str, tuple[str, str]] = {
     "log.report_not_sent": ("[yellow]report built but not sent[/]",
                             "[yellow]報告已產生但未送出[/]"),
     "log.report_err": ("[red]report error: {e}[/]", "[red]報告錯誤：{e}[/]"),
+    "log.report_auto": (
+        "[cyan]auto-report window reached — pushing scheduled report[/]",
+        "[cyan]已到自動報告時段 — 推送排程報告[/]"),
+
+    # ── multi-wallet Telegram report body (wallet_report.py) ─────────────────
+    "rpt.title": ("📊 *Alpaca Wallets Report*", "📊 *Alpaca 錢包總報告*"),
+    "rpt.leaderboard": ("🏆 *LEADERBOARD* (vs $100k)",
+                        "🏆 *排行榜*（對比 $100k）"),
+    "rpt.combined": ("*ALL WALLETS ({n})*", "*全部錢包（{n}）*"),
+    "rpt.equity": ("Equity", "總資產"),
+    "rpt.day": ("Day", "本日"),
+    "rpt.vs_base": ("vs base", "對比本金"),
+    "rpt.up_down": ("{up}▲ {down}▼", "{up}▲ {down}▼"),
+    "rpt.trades": ("Trades today", "今日交易"),
+    "rpt.no_trades": ("no trades today", "今日無交易"),
+    "rpt.all_cash": ("all cash — no positions", "全部現金 — 無持倉"),
+    "rpt.err": ("⚠ {name}: {err}", "⚠ {name}：{err}"),
+    "rpt.footer": ("_Alpaca Paper Trader · multi-wallet report_",
+                   "_Alpaca 模擬交易 · 多錢包報告_"),
 
     # ── trading actions ───────────────────────────────────────────────────────
     "confirm.flatten": ("Flatten ALL positions to cash?", "將全部持倉平倉為現金？"),
@@ -384,6 +440,20 @@ _TABLE: dict[str, tuple[str, str]] = {
     "log.capitol_done": ("[cyan]Capitol run complete[/]", "[cyan]國會跟單完成[/]"),
     "log.capitol_err": ("[red]capitol error: {e}[/]", "[red]國會跟單錯誤：{e}[/]"),
     "confirm.buy": ("BUY {sym}  ${amt}?", "買入 {sym}  ${amt}？"),
+    "confirm.buy_shares": ("BUY {sym}  {qty} shares ≈ ${est}? (whole-share asset)",
+                           "買入 {sym}  {qty} 股 ≈ ${est}？（此標的僅限整股）"),
+    "buy.err_unknown": ("unknown or untradable symbol", "代號不存在或不可交易"),
+    "buy.rule_checking": ("[dim]checking trading rules…[/]", "[dim]檢查交易規則中…[/]"),
+    "buy.rule_unknown": ("[b red]✗ {sym}: unknown or NOT tradable on Alpaca — order would be rejected[/]",
+                         "[b red]✗ {sym}：代號不存在或 Alpaca 不可交易 — 委託將被拒絕[/]"),
+    "buy.rule_frac": ("[green]✓ {sym}: tradable · fractional OK — $ amounts accepted[/]",
+                      "[green]✓ {sym}：可交易 · 可碎股 — 可直接用金額下單[/]"),
+    "buy.rule_whole": ("[yellow]✓ {sym}: tradable · ⚠ WHOLE SHARES ONLY @ ${price}/sh — your $ converts to whole shares[/]",
+                       "[yellow]✓ {sym}：可交易 · ⚠ 僅限整股 @ ${price}/股 — 金額將自動換算為整股數[/]"),
+    "buy.err_whole": (
+        "[red]{sym} trades in whole shares only — one share costs ${price}, "
+        "more than your ${amt}[/]",
+        "[red]{sym} 僅限整股交易 — 每股 ${price}，超過您輸入的 ${amt}[/]"),
     "confirm.sell_all": ("SELL ALL of {sym}?", "全數賣出 {sym}？"),
     "confirm.sell_amt": ("SELL ${amt} of {sym}?", "賣出 {sym} ${amt}？"),
     "log.no_pos_sel": ("[yellow]no position selected[/]", "[yellow]未選擇持倉[/]"),
@@ -394,6 +464,9 @@ _TABLE: dict[str, tuple[str, str]] = {
     "log.order_sent": ("[green]{side} {sym} sent → {id}[/]",
                        "[green]已送出 {side} {sym} → {id}[/]"),
     "log.order_err": ("[red]order error: {e}[/]", "[red]下單錯誤：{e}[/]"),
+    "log.order_rejected": (
+        "[b red]{side} {sym} REJECTED by Alpaca — {reason}[/]",
+        "[b red]{side} {sym} 遭 Alpaca 拒絕 — {reason}[/]"),
 
     # ── rebalance ─────────────────────────────────────────────────────────────
     "log.reb_both": ("[red]pick ONE: deploy OR withdraw[/]",

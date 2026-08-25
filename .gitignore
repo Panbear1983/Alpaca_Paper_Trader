@@ -29,3 +29,27 @@ reports/cron.log
 
 # autonomous-edit sandbox artifacts (Stage 2 propose/apply)
 proposals/
+
+# runtime state — regenerated each run, mirrors DIFF_SKIP in propose_change.py.
+# Never publish live wallet state to a public repo.
+.copied_trades*.json
+.position_state*.json
+.swing_state*.json
+.intraday_state*.json
+.isr_alpha_state*.json
+.trading_schedule_state*.json
+.event_watcher_state.json
+.event_watcher.lock
+.tui.lock
+pool_state.json
+performance_log.json
+politician_history.json
+review_log.json
+vetting_log.json
+isr2026_signals.json
+
+# generated output
+logs/
+reports/*.md
+*.bak_pre_split
+*.backup

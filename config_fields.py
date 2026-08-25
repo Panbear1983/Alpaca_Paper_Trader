@@ -68,9 +68,9 @@ FIELDS: list[Field] = [
     # ── EXIT ENGINE ──────────────────────────────────────────────────────────
     Field("EXITS", "dynamic_exits.stop_loss_pct", "Stop-loss (frac)", "float", 0.02, 0.25,
           desc="Sell all when unrealized loss reaches this (0.08 = -8%)."),
-    Field("EXITS", "dynamic_exits.trail_trigger_pct", "Trail trigger (frac)", "float", 0.05, 0.50,
+    Field("EXITS", "dynamic_exits.trail_trigger_pct", "Trail trigger (frac)", "float", 0.01, 1.0,
           desc="Trailing stop activates once peak gain reaches this."),
-    Field("EXITS", "dynamic_exits.trail_giveback_pct", "Trail giveback (frac)", "float", 0.02, 0.25,
+    Field("EXITS", "dynamic_exits.trail_giveback_pct", "Trail giveback (frac)", "float", 0.01, 1.0,
           desc="After trigger, sell if price falls this far off the peak."),
     Field("EXITS", "dynamic_exits.pyramid_add_frac", "Pyramid add size (frac of orig)", "float",
           0.0, 1.0,

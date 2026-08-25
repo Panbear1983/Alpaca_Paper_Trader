@@ -75,11 +75,11 @@ POLITICIAN_NAMES: dict[str, tuple[str, str]] = {
 # ── local state loader ────────────────────────────────────────────────────────
 def load_local_state() -> dict:
     """Read pool, copied-trades and strategy config from disk."""
+    import strategies
     state: dict = {}
     files = {
         "pool":    HERE / "pool_state.json",
-        "copied":  HERE / ".copied_trades.json",
-        "config":  HERE / "strategy_config.json",
+        "copied":  Path(strategies.state_path(".copied_trades.json")),
     }
     for key, path in files.items():
         try:
@@ -87,14 +87,27 @@ def load_local_state() -> dict:
                 state[key] = json.load(f)
         except Exception:
             state[key] = {}
+    try:        # global ∪ the wallet this report is bound to
+        state["config"] = strategies.load_merged()
+    except Exception:
+        state["config"] = {}
     return state
 
 
 # ── Alpaca fetch helpers ───────────────────────────────────────────────────────
+_session = requests.Session()
+
 def _get(url: str, **params: Any) -> Any:
-    r = requests.get(url, headers=HEADERS, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()
+    import time
+    for attempt in range(3):
+        try:
+            r = _session.get(url, headers=HEADERS, params=params, timeout=10)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            if attempt == 2:
+                raise
+            time.sleep(1)
 
 
 def fetch_account() -> dict:
@@ -254,8 +267,10 @@ def fetch_bars_ranged(symbol: str, range_key: str = "1D") -> list[dict]:
 # Alpaca portfolio history period strings per range key
 # NOTE: /account/portfolio/history only accepts timeframe in
 # {1Min, 5Min, 15Min, 1H, 1D} — "30Min" (valid on the /bars endpoint) 422s here.
-_PH_PERIOD = {"1D": "1D", "1W": "1W", "1M": "1M", "3M": "3M", "6M": "6M", "1Y": "1A"}
-_PH_TF     = {"1D": "5Min", "1W": "15Min", "1M": "1D", "3M": "1D", "6M": "1D", "1Y": "1D"}
+_PH_PERIOD = {"1D": "1D", "1W": "1W", "1M": "1M", "3M": "3M", "6M": "6M",
+              "1Y": "1A", "3Y": "3A", "ALL": "all"}
+_PH_TF     = {"1D": "5Min", "1W": "15Min", "1M": "1D", "3M": "1D", "6M": "1D",
+              "1Y": "1D", "3Y": "1D", "ALL": "1D"}
 
 
 def fetch_portfolio_history_ranged(range_key: str = "1D") -> list[dict]:
@@ -644,18 +659,19 @@ def run_report(push: bool = True, channel: str | None = None, log=print) -> dict
     # with the summary placed near the top (answer-first layout).
     body = build_report(acct, positions, today_buys, quotes, spy_pct, local)
 
-    # ── Analyst Take — grounded LLM summary via OpenRouter (optional) ──────
+    # ── Analyst Take — grounded LLM summary via Hermes (Codex Terra, then
+    #    NVIDIA Nemotron 120B on failure). See analyst_llm.py. ───────────────
     analyst = None
     try:
-        import openrouter_analyst
-        summary = openrouter_analyst.summarize(body)
+        import analyst_llm
+        summary = analyst_llm.summarize(body)
         if summary and not summary.startswith("[analyst error"):
             analyst = summary
-            log(f"[analyst] summary added ({openrouter_analyst.MODEL})")
+            log(f"[analyst] summary added ({analyst_llm.MODEL})")
         elif summary:  # error string — note it, don't break the report
             log(f"[analyst] {summary}")
         else:
-            log("[analyst] no OPENROUTER_API_KEY set — skipping summary")
+            log("[analyst] Hermes CLI not reachable — skipping summary")
     except Exception as e:
         log(f"[analyst] skipped: {e}")
 

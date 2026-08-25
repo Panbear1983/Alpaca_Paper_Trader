@@ -32,6 +32,7 @@ Env reads from .env in this folder: ALPACA_API_KEY/SECRET/BASE_URL, TELEGRAM_*.
 import os, json, argparse
 import datetime as dt
 import requests
+from datetime import time, timedelta
 
 # Reuse the Alpaca plumbing already proven in capitol_copier.
 from capitol_copier import (
@@ -39,40 +40,65 @@ from capitol_copier import (
     place_market_order, get_positions, get_account_equity,
 )
 
+# World Clock for timezone-aware time handling
+from utils.world_clock import is_market_open, get_ny_time
+
 try:
     import telegram_notifier as tg
 except ImportError:
     tg = None
 
-CONFIG_FILE     = os.path.join(os.path.dirname(__file__), "strategy_config.json")
-STATE_FILE      = os.path.join(os.path.dirname(__file__), ".intraday_state.json")
+import strategies
+
+
+def _state_file() -> str:              # per-wallet intraday entries/rank state
+    return strategies.state_path(".intraday_state.json")
 
 
 # ── Config / state ──────────────────────────────────────────────────────────
 
 def load_config():
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
+    """Global app config ∪ the ACTIVE wallet's strategy file."""
+    return strategies.load_merged()
 
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
+    if os.path.exists(_state_file()):
+        with open(_state_file()) as f:
             return json.load(f)
     return {"entries": {}, "done_date": None, "last_rank": []}
 
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
+    with open(_state_file(), "w") as f:
         json.dump(state, f, indent=2)
 
 
 # ── Alpaca helpers (intraday-specific) ──────────────────────────────────────
 
 def get_clock():
-    r = requests.get(f"{BASE_URL}/clock", headers=ALPACA_HEADERS, timeout=10)
-    r.raise_for_status()
-    return r.json()
+    """Get market clock using world clock for timezone consistency."""
+    ny_time = get_ny_time()
+    is_open = is_market_open(ny_time)
+    # For simplicity, we assume next open is today at 9:30 if before open, else tomorrow at 9:30
+    # Similarly, next close is today at 16:00 if before close, else tomorrow at 16:00
+    if ny_time.time() < time(9, 30):
+        next_open = ny_time.replace(hour=9, minute=30, second=0, microsecond=0)
+    else:
+        # After market open, next open is next trading day (simplified: +1 day, skip weekends)
+        next_open = ny_time.replace(hour=9, minute=30, second=0, microsecond=0) + timedelta(days=1)
+        # TODO: skip weekends
+    if ny_time.time() < time(16, 0):
+        next_close = ny_time.replace(hour=16, minute=0, second=0, microsecond=0)
+    else:
+        next_close = ny_time.replace(hour=16, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        # TODO: skip weekends
+    return {
+        "timestamp": ny_time.isoformat(),
+        "is_open": is_open,
+        "next_open": next_open.isoformat(),
+        "next_close": next_close.isoformat()
+    }
 
 
 def get_snapshots(symbols):

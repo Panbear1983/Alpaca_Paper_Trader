@@ -45,8 +45,9 @@ from sectors import TICKER_SECTOR
 # ── Config & state I/O ───────────────────────────────────────────────────────
 
 def load_config():
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
+    """Global app config ∪ the ACTIVE wallet's strategy file."""
+    import strategies
+    return strategies.load_merged()
 
 
 def load_universe():

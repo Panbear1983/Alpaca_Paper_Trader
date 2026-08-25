@@ -4,7 +4,7 @@
 # on weekdays. DST-aware via zoneinfo.
 
 set -euo pipefail
-SCRIPT_DIR="/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader"
+SCRIPT_DIR="/Users/peter/GitHub/Alpaca_Paper_Trader"
 LOG_FILE="$SCRIPT_DIR/reports/cron.log"
 mkdir -p "$SCRIPT_DIR/reports"
 

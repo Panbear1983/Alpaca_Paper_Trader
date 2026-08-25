@@ -14,6 +14,7 @@ are used — nothing in this module can place, change, or cancel an order.
 from __future__ import annotations
 
 import datetime as dt
+import zoneinfo
 from typing import Any
 
 import requests
@@ -23,6 +24,11 @@ import wallets
 # Portfolio-history period/timeframe per TUI range key. Reused from
 # hermes_report (single source of truth — its "30Min 422s here" fix included).
 from hermes_report import _PH_PERIOD, _PH_TF
+
+
+ACCOUNT_BASELINE_USD = 100_000.0
+
+_ET = zoneinfo.ZoneInfo("America/New_York")
 
 
 def _f(x, default=0.0) -> float:
@@ -39,12 +45,20 @@ def snapshot(name: str, key: str, secret: str, base: str,
     wallet can't blank the whole compare page."""
     headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret,
                "Accept": "application/json"}
+    session = requests.Session()
+    session.headers.update(headers)
 
     def get(path: str, **params) -> Any:
-        r = requests.get(f"{base}{path}", headers=headers, params=params,
-                         timeout=10)
-        r.raise_for_status()
-        return r.json()
+        import time
+        for attempt in range(3):
+            try:
+                r = session.get(f"{base}{path}", params=params, timeout=10)
+                r.raise_for_status()
+                return r.json()
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                time.sleep(1)
 
     try:
         acct = get("/account")
@@ -61,8 +75,11 @@ def snapshot(name: str, key: str, secret: str, base: str,
     day_pl = equity - last
     day_pct = (day_pl / last * 100) if last else 0.0
     # Same convention as the main summary line: paper accounts start at $100k.
-    total_pl = equity - 100000.0
-    total_pct = total_pl / 1000.0
+    # Do not use the first Alpaca history point as the baseline; for a 1M view
+    # that can be a mid-run equity like $102.4k and makes total figures drift.
+    total_pl = equity - ACCOUNT_BASELINE_USD
+    total_pct = ((total_pl / ACCOUNT_BASELINE_USD * 100)
+                 if ACCOUNT_BASELINE_USD else 0.0)
 
     # Equity history over the compare window. Fetched separately so a history
     # hiccup degrades to "no chart" instead of killing the leaderboard row.
@@ -83,8 +100,26 @@ def snapshot(name: str, key: str, secret: str, base: str,
     except Exception:
         pass
 
-    first_eq = next((eq for _, eq in hist if eq), 0.0)
-    win_ret = ((hist[-1][1] / first_eq - 1) * 100) if (hist and first_eq) else None
+    # Append the LIVE equity as the final point. Daily history ends at
+    # YESTERDAY'S close, so a wallet that rallied today still charted
+    # downward while the (live) header said it was up — two clocks in one
+    # section. With this, every curve ends at NOW.
+    #
+    # Exception — 1D outside the last session's day: pre/post-market Alpaca's
+    # 1D history is the PREVIOUS session, and the 1D chart labels are
+    # time-only (%H:%M), so a "now" point from a later ET day parses as
+    # earlier than the session bars and the plotted line doubles back across
+    # the chart. Skip the append then; the chart shows the last full session.
+    if hist and equity:
+        now = dt.datetime.now(dt.timezone.utc)
+        if range_key == "1D":
+            last = dt.datetime.fromisoformat(hist[-1][0])
+            if last.astimezone(_ET).date() != now.astimezone(_ET).date():
+                now = None
+        if now is not None:
+            hist.append((now.isoformat(), equity))
+
+    win_ret = ((equity / ACCOUNT_BASELINE_USD - 1) * 100) if equity else None
 
     return {
         "name": name, "ok": True, "err": "",
@@ -95,7 +130,8 @@ def snapshot(name: str, key: str, secret: str, base: str,
         "npos": len(positions),
         "positions": positions,
         "hist": hist,
-        "win_ret": win_ret,                 # % return over range_key, or None
+        "win_ret": win_ret,                 # % return vs $100k baseline, or None
+        "baseline_usd": ACCOUNT_BASELINE_USD,
     }
 
 
@@ -103,15 +139,20 @@ def gather(range_key: str = "1M") -> list[dict[str, Any]]:
     """Snapshot every declared wallet (config order). Unconfigured wallets
     (missing .env creds) come back as ok=False rows so the leaderboard can
     still show they exist."""
-    out = []
-    for info in wallets.list_wallets():
+    import concurrent.futures
+    wallet_list = wallets.list_wallets()
+    
+    def process_wallet(info):
         name = info["name"]
         creds = wallets.resolve(name)
         if creds is None:
-            out.append({"name": name, "ok": False,
-                        "err": "not configured — set " +
-                               " / ".join(info["missing"]) + " in .env"})
-            continue
+            return {"name": name, "ok": False,
+                    "err": "not configured — set " +
+                           " / ".join(info["missing"]) + " in .env"}
         key, secret, base = creds
-        out.append(snapshot(name, key, secret, base, range_key))
+        return snapshot(name, key, secret, base, range_key)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(wallet_list) or 1) as executor:
+        out = list(executor.map(process_wallet, wallet_list))
+        
     return out

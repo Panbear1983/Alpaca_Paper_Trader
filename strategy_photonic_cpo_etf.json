@@ -1,0 +1,139 @@
+{
+  "version": 3,
+  "last_updated": "2026-06-12",
+  "updated_by": "wallets.add: engines OFF for 'Photonic CPO ETF'",
+  "capitol_copier": {
+    "trade_size_usd": 1000,
+    "max_trade_size_usd": 3000,
+    "min_trade_size_usd": 200,
+    "max_disclosure_lag_days": 14,
+    "dedup_window_days": 45,
+    "legacy_politician_id": "K000389",
+    "legacy_politician_name": "Ro Khanna",
+    "target_sectors": [
+      "tech",
+      "robotics",
+      "energy",
+      "industrial"
+    ],
+    "sentiment_veto_enabled": false,
+    "autorun_enabled": false
+  },
+  "pool": {
+    "max_size": 4,
+    "min_size": 3,
+    "daily_budget_usd": 2500,
+    "backtest_window_days": 90,
+    "consensus_boost_multiplier": 3.0,
+    "consensus_window_days": 14,
+    "max_position_usd": 8000,
+    "min_position_usd": 200,
+    "max_total_exposure_pct": 1.0,
+    "rebalance_frequency": "weekly",
+    "revet_frequency": "monthly",
+    "probation_weeks": 2,
+    "max_weight_change_per_week": 0.15,
+    "auto_pause_win_rate": 0.3,
+    "rank_weights": {
+      "1": 0.5,
+      "2": 0.3,
+      "3": 0.13,
+      "4": 0.07
+    }
+  },
+  "dynamic_exits": {
+    "enabled": true,
+    "stop_loss_pct": 0.08,
+    "trail_trigger_pct": 0.5,
+    "trail_giveback_pct": 0.25,
+    "take_profit_levels": [
+      [
+        0.25,
+        0.33
+      ],
+      [
+        0.5,
+        0.5
+      ]
+    ],
+    "pyramid_levels": [
+      0.1,
+      0.2
+    ],
+    "pyramid_add_frac": 0.5,
+    "prune_off_target": false,
+    "max_holdings": 20
+  },
+  "intraday": {
+    "enabled": false,
+    "universe": [
+      "NVDA",
+      "TSLA",
+      "AMD",
+      "META",
+      "AAPL",
+      "AVGO",
+      "MSFT",
+      "AMZN",
+      "GOOGL",
+      "NFLX",
+      "SMCI",
+      "COIN",
+      "MU",
+      "QCOM",
+      "CRM",
+      "PLTR",
+      "MRVL",
+      "ARM",
+      "ASML",
+      "INTC",
+      "ADBE",
+      "NOW",
+      "PANW",
+      "ANET",
+      "ORCL"
+    ],
+    "top_n": 6,
+    "gross_mult": 4.0,
+    "stop_pct": 0.03,
+    "flatten_minutes": 12
+  },
+  "scoring_weights": {
+    "realized_return_alpha": 0.3,
+    "win_rate": 0.25,
+    "disclosure_speed": 0.15,
+    "sector_diversification": 0.1,
+    "activity_consistency": 0.1,
+    "sample_size_confidence": 0.1
+  },
+  "review": {
+    "min_win_rate_threshold": 0.4,
+    "target_win_rate": 0.55,
+    "min_profit_factor": 1.2,
+    "min_sharpe": 0.5,
+    "trade_size_step_usd": 100,
+    "stop_loss_step_pct": 0.01,
+    "trailing_trigger_step_pct": 0.01
+  },
+  "swing": {
+    "enabled": true,
+    "regime_sma_days": 50,
+    "rs_lookback_days": 20,
+    "max_new_positions_per_run": 2,
+    "entry_size_usd": 3000,
+    "dip_min_peak_gain": 0.08,
+    "dip_trigger_off_peak": 0.04,
+    "dip_add_usd": 1500,
+    "dip_cooldown_days": 7,
+    "stop_cooldown_days": 5,
+    "min_cash_reserve_usd": 2000,
+    "max_holdings": 20
+  },
+  "trading_schedule": {
+    "manage_every_minutes": 20,
+    "swing_time_et": "10:00",
+    "copy_time_et": "10:30",
+    "window_minutes": 20,
+    "weekdays_only": true
+  }
+}

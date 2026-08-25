@@ -79,9 +79,13 @@ def main() -> int:
         return 0
 
     print(f"[sched] {now:%H:%M ET} in window — firing report")
-    import hermes_report as hr
-    hr.run_report(push=True, channel=cfg.get("channel"),
-                  log=lambda m: print(m, flush=True))
+    # Multi-wallet report (2026-07-17). The running TUI now owns this same
+    # schedule via an in-process tick sharing this state file, so whichever
+    # path fires first wins and the other skips on the dedup stamp.
+    import wallet_report
+    wallet_report._cli_lang()
+    wallet_report.send_wallets_report(push=True, channel=cfg.get("channel"),
+                                      log=lambda m: print(m, flush=True))
     state["last_fired_date"] = today
     _save_state(state)
     print(f"[sched] done; marked fired for {today}")

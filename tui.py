@@ -17,6 +17,7 @@ Keys:
   p  push full report → Telegram (no arm needed)
   o  toggle chart: whole portfolio (equity) vs the selected holding
   w  cycle chart timeframe: 1D → 1W → 1M → 3M → 6M → 1Y
+  Shift+W  compare wallets
   g  edit the scheduled auto-report (time / on-off / weekdays / channel)
   m  edit Telegram channels (config only — values stay in .env)
   f  flatten ALL            t  live intraday tick
@@ -56,12 +57,15 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 import hermes_report as hr
+import wallet_report as wr
+import report_scheduler as rsched
 import intraday_momentum as im
 import capitol_copier as cc
 import rebalance_top_n as rb
 import config_io
 import config_fields as cf
 import wallets as wl
+import strategies
 import compare as cmpw
 import i18n
 from i18n import t
@@ -107,36 +111,80 @@ def fetch_company_bio(symbol: str) -> tuple[str, str]:
         return ("", "")
 
 
-def translate_to_zh(text: str) -> str:
-    """Company-bio translation EN → 繁體中文 via OpenRouter (haiku tier —
-    ~0.1¢ per lookup; the caller caches per symbol so each company is paid
-    for once). Returns '' on any failure so the caller keeps English."""
+def fetch_ticker_perf(symbol: str) -> dict:
+    """Price-return %s for the searched ticker: past month, past year, and
+    all-time (split-adjusted closes from Alpaca market data — free, follows the
+    active wallet's creds). Returns {"1M": pct, "1Y": pct, "ALL": pct}; windows
+    with no data are simply absent. {} on total failure."""
+    out: dict[str, float] = {}
+    now = dt.datetime.now(dt.timezone.utc)
     try:
-        import openrouter_analyst as oa
-        if not oa.API_KEY:
-            return ""
-        r = requests.post(
-            oa.URL,
-            headers={"Authorization": f"Bearer {oa.API_KEY}",
-                     "Content-Type": "application/json"},
-            json={
-                "model": "anthropic/claude-haiku-4.5",
-                "messages": [
-                    {"role": "system",
-                     "content": "Translate the user's company description into "
-                                "Traditional Chinese (繁體中文, Taiwan usage). "
-                                "Keep company and product names in English. "
-                                "Output ONLY the translation."},
-                    {"role": "user", "content": text[:4000]},
-                ],
-                "max_tokens": 1500,
-                "temperature": 0.2,
-            },
-            timeout=30,
-        )
-        if r.status_code != 200:
-            return ""
-        return r.json()["choices"][0]["message"]["content"].strip()
+        r = requests.get(
+            f"{hr.ALPACA_DATA}/stocks/{symbol}/bars", headers=hr.HEADERS,
+            params={"timeframe": "1Day", "adjustment": "split", "limit": 1000,
+                    "start": (now - dt.timedelta(days=370)).strftime("%Y-%m-%d")},
+            timeout=10)
+        closes = [(b.get("t", ""), float(b["c"]))
+                  for b in (r.json().get("bars") or []) if b.get("c") is not None]
+        if closes:
+            last = closes[-1][1]
+            cutoff = (now - dt.timedelta(days=31)).strftime("%Y-%m-%d")
+            month = [c for ts, c in closes if ts >= cutoff]
+            if month and month[0]:
+                out["1M"] = (last / month[0] - 1) * 100
+            if closes[0][1]:
+                out["1Y"] = (last / closes[0][1] - 1) * 100
+        # All-time: monthly bars since forever (a few hundred bars at most)
+        r = requests.get(
+            f"{hr.ALPACA_DATA}/stocks/{symbol}/bars", headers=hr.HEADERS,
+            params={"timeframe": "1Month", "adjustment": "split", "limit": 10000,
+                    "start": "1970-01-01"},
+            timeout=10)
+        mbars = [float(b["c"]) for b in (r.json().get("bars") or [])
+                 if b.get("c") is not None]
+        if closes and mbars and mbars[0]:
+            out["ALL"] = (closes[-1][1] / mbars[0] - 1) * 100
+    except Exception:
+        pass
+    return out
+
+
+def fetch_asset_info(symbol: str) -> dict | None:
+    """Alpaca /assets record (tradable/fractionable flags). None if unknown."""
+    try:
+        r = requests.get(f"{hr.ALPACA_BASE}/assets/{symbol}",
+                         headers=hr.HEADERS, timeout=10)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+def latest_price(symbol: str) -> float:
+    """Best-effort latest price: live quote, falling back to the last bar."""
+    try:
+        q = hr.fetch_quotes([symbol]).get(symbol) or {}
+        p = float(q.get("ap") or 0) or float(q.get("bp") or 0)
+        if p > 0:
+            return p
+    except Exception:
+        pass
+    try:
+        bars = hr.fetch_bars(symbol)
+        if bars:
+            return float(bars[-1]["c"])
+    except Exception:
+        pass
+    return 0.0
+
+
+def translate_to_zh(text: str) -> str:
+    """Company-bio translation EN → 繁體中文 via Hermes (Codex Terra, falling
+    back to NVIDIA Nemotron 120B). No OpenRouter and no API key in this repo —
+    credentials live in the Hermes profile. The caller caches per symbol.
+    Returns '' on any failure so the caller keeps English."""
+    try:
+        import analyst_llm
+        return analyst_llm.translate_zh(text)
     except Exception:
         return ""
 
@@ -164,6 +212,23 @@ def fetch_asset_name(symbol: str) -> str:
         return name
     except Exception:
         return ""
+
+
+# Modules whose on-disk changes mean "this running window is now STALE" — the
+# freshness watcher compares their newest mtime against the value at boot and
+# tells the operator to restart, so features/fixes are never exercised through
+# an old process by accident.
+_CODE_FILES = ("tui.py", "i18n.py", "wallets.py", "strategies.py", "compare.py",
+               "config_fields.py", "config_io.py", "hermes_report.py",
+               "wallet_report.py", "report_scheduler.py",
+               "capitol_copier.py", "swing_buyer.py", "intraday_momentum.py")
+
+
+def _code_mtime() -> float:
+    base = os.path.dirname(os.path.abspath(__file__))
+    return max((os.path.getmtime(os.path.join(base, f))
+                for f in _CODE_FILES if os.path.exists(os.path.join(base, f))),
+               default=0.0)
 
 
 # Key-hint line for the footer lives in the i18n catalog ("keys.hints") so the
@@ -202,17 +267,27 @@ class ConfirmModal(ModalScreen[bool]):
 
 class BuyModal(ModalScreen[tuple | None]):
     """Collect (symbol, notional_usd) for a manual buy, with a live 'cash after'
-    readout as you type. Returns (sym, amt) or None on cancel."""
+    readout as you type. Returns (sym, amt) or None on cancel.
+
+    Rules of engagement: entering the symbol fetches the asset's trading rules
+    from Alpaca and shows them in the #rules line (tradable? whole-share-only?
+    price). Submission is BLOCKED in-modal when the input violates them —
+    unknown/untradable symbols, or a $ amount below one share of a whole-share
+    asset — so a doomed order can never leave the form."""
     BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, avail_cash: float = 0.0):
         super().__init__()
         self._avail = max(0.0, _f(avail_cash))
+        self._rules_sym: str = ""              # symbol the loaded rules describe
+        self._asset: dict | None = None
+        self._price: float = 0.0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label(t("buy.title"), id="q")
             yield Input(placeholder=t("buy.sym_ph"), id="sym")
+            yield Label("", id="rules")
             yield Label(t("buy.avail", cash=f"{self._avail:,.2f}"), id="avail")
             yield Input(placeholder=t("buy.amt_ph"), id="amt")
             yield Label("", id="after")
@@ -223,6 +298,31 @@ class BuyModal(ModalScreen[tuple | None]):
     def on_mount(self) -> None:
         self._update_after()
         self.query_one("#sym", Input).focus()
+
+    # ── rules of engagement ──────────────────────────────────────────────────
+    @work(thread=True, exclusive=True, group="buy_rules")
+    def _load_rules(self, sym: str, then_submit: bool = False) -> None:
+        asset = fetch_asset_info(sym)
+        price = 0.0
+        if asset and asset.get("tradable") and not asset.get("fractionable"):
+            price = latest_price(sym)
+
+        def done() -> None:
+            if not self.is_mounted:
+                return
+            self._rules_sym, self._asset, self._price = sym, asset, price
+            self.query_one("#rules", Label).update(self._rules_text())
+            if then_submit:
+                self._accept()
+        self.app.call_from_thread(done)
+
+    def _rules_text(self) -> str:
+        if self._asset is None or not self._asset.get("tradable"):
+            return t("buy.rule_unknown", sym=self._rules_sym)
+        if self._asset.get("fractionable"):
+            return t("buy.rule_frac", sym=self._rules_sym)
+        return t("buy.rule_whole", sym=self._rules_sym,
+                 price=f"{self._price:,.2f}")
 
     def _update_after(self) -> None:
         amt = _amt_of(self.query_one("#amt", Input).value, self._avail)
@@ -236,15 +336,68 @@ class BuyModal(ModalScreen[tuple | None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "amt":
             self._update_after()
+        elif event.input.id == "sym":
+            # Symbol edited → any loaded rules are stale
+            if event.value.strip().upper() != self._rules_sym:
+                self._rules_sym = ""
+                self.query_one("#rules", Label).update("")
+
+    def _accept(self) -> None:
+        """Validate and submit. Invalid input shows an error and KEEPS the
+        modal open — it must never silently swallow a buy (a comma or $ in the
+        amount used to close the modal as if cancelled). Enforces the asset's
+        rules of engagement before anything can leave the form."""
+        sym = self.query_one("#sym", Input).value.strip().upper()
+        # Same tolerant parser as the live readout: strips $ and commas,
+        # accepts 'all'/'max' for the full available cash.
+        amt = _amt_of(self.query_one("#amt", Input).value, self._avail)
+        if not sym:
+            self.query_one("#after", Label).update(t("buy.err_sym"))
+            self.query_one("#sym", Input).focus()
+            return
+        if amt <= 0:
+            self.query_one("#after", Label).update(t("buy.err_amt"))
+            self.query_one("#amt", Input).focus()
+            return
+        # Rules not loaded for THIS symbol yet (e.g. user clicked Buy without
+        # leaving the field) → load them, then auto-continue the submit.
+        if self._rules_sym != sym:
+            self.query_one("#rules", Label).update(t("buy.rule_checking"))
+            self._load_rules(sym, then_submit=True)
+            return
+        # HARD BLOCKS — the order would be rejected by Alpaca anyway; refuse
+        # it here where the reason is visible instead.
+        if self._asset is None or not self._asset.get("tradable"):
+            self.query_one("#rules", Label).update(self._rules_text())
+            self.query_one("#sym", Input).focus()
+            return
+        if not self._asset.get("fractionable") and self._price > 0:
+            qty = int(amt // self._price)
+            if qty < 1:
+                self.query_one("#after", Label).update(
+                    t("buy.err_whole", sym=sym, price=f"{self._price:,.2f}",
+                      amt=f"{amt:,.0f}"))
+                self.query_one("#amt", Input).focus()
+                return
+        self.dismiss((sym, amt))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "ok":
-            sym = self.query_one("#sym", Input).value.strip().upper()
-            amt = _f(self.query_one("#amt", Input).value)
-            if sym and amt > 0:
-                self.dismiss((sym, amt))
-                return
-        self.dismiss(None)
+            self._accept()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Enter in the SYMBOL field advances to the amount and loads the
+        # asset's trading rules; Enter in the AMOUNT field submits.
+        if event.input.id == "sym":
+            sym = event.input.value.strip().upper()
+            if sym and sym != self._rules_sym:
+                self.query_one("#rules", Label).update(t("buy.rule_checking"))
+                self._load_rules(sym)
+            self.query_one("#amt", Input).focus()
+        else:
+            self._accept()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -618,13 +771,17 @@ class StrategyConfigModal(ModalScreen[None]):
                 st = json.load(f)
         except Exception:
             st = {}
+        # Per-wallet stamps (flat dict = pre-split legacy → treat as this wallet's)
+        st = st.get(strategies.slug(wl.current()), st if "last_manage_at" in st else {})
         man = (st.get("last_manage_at") or "never")[:16].replace("T", " ")
-        return i18n.t("cfg.head", man=man,
+        return i18n.t("cfg.head", wallet=wl.current(),
+                      file=os.path.basename(strategies.path_for(wl.current())),
+                      man=man,
                       swing=st.get("last_swing_date", "never"),
                       copy=st.get("last_copy_date", "never"))
 
     def _populate(self) -> None:
-        cfg = config_io.load_config()
+        cfg = strategies.load_strategy(wl.current())
         t = self.query_one("#cfgtable", DataTable)
         t.clear()
         self.query_one("#cfg_head", Label).update(self._sched_status())
@@ -651,7 +808,7 @@ class StrategyConfigModal(ModalScreen[None]):
         field = cf.by_path(path)
         if not field:
             return
-        current = cf.get_path(config_io.load_config(), path)
+        current = cf.get_path(strategies.load_strategy(wl.current()), path)
         self.app.push_screen(
             EditFieldModal(field, current),
             lambda res: self._after_edit(field, current, res),
@@ -682,7 +839,7 @@ class StrategyConfigModal(ModalScreen[None]):
         if field.danger == "prune":
             if not new_val:
                 return None                      # turning OFF is harmless
-            cfg = config_io.load_config()
+            cfg = strategies.load_merged(wl.current())
             syms = self._syms
             if not syms:                         # modal opened before first refresh
                 try:
@@ -707,7 +864,8 @@ class StrategyConfigModal(ModalScreen[None]):
 
     def _save(self, field: cf.Field, old, new_val) -> None:
         try:
-            config_io.update_config(lambda c: cf.set_path(c, field.path, new_val))
+            strategies.update_strategy(lambda c: cf.set_path(c, field.path, new_val),
+                                       wl.current())
         except Exception as e:
             self.app._log(i18n.t("log.cfg_save_err", path=field.path, e=e))
             return
@@ -799,17 +957,65 @@ class RenameWalletModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class AddWalletModal(ModalScreen[dict | None]):
+    """Collect (name, API key, secret) for a NEW wallet (key 'a' inside the
+    wallet picker). Nothing is saved here — the caller runs wallets.add(),
+    which validates the keys live against /v2/account first. Returns the
+    entered dict, or None on cancel."""
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(t("wadd.title"), id="q")
+            yield Input(id="wname", placeholder=t("wadd.name_ph"))
+            yield Input(id="wkey", placeholder=t("wadd.key_ph"))
+            yield Input(id="wsecret", placeholder=t("wadd.secret_ph"), password=True)
+            yield Label("", id="err")
+            with Horizontal(id="buttons"):
+                yield Button(t("btn.add"), variant="error", id="ok")
+                yield Button(t("btn.cancel"), variant="primary", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#wname", Input).focus()
+
+    def _accept(self) -> None:
+        name = self.query_one("#wname", Input).value.strip()
+        key = self.query_one("#wkey", Input).value.strip()
+        secret = self.query_one("#wsecret", Input).value.strip()
+        if not (name and key and secret):
+            self.query_one("#err", Label).update(t("wadd.err_all"))
+            return
+        self.dismiss({"name": name, "key": key, "secret": secret})
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self._accept() if event.button.id == "ok" else self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Enter advances name → key → secret, then submits (form-style).
+        order = ("wname", "wkey", "wsecret")
+        if event.input.id in order[:-1]:
+            nxt = order[order.index(event.input.id) + 1]
+            self.query_one(f"#{nxt}", Input).focus()
+        else:
+            self._accept()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class WalletModal(ModalScreen[str | None]):
-    """Pick which Alpaca paper account the TUI reads + acts on (key 'k'), or
-    rename a wallet with 'e'. Returns the chosen wallet name to switch to, or
-    None. Unconfigured wallets (missing creds in .env) are shown but not
-    selectable."""
-    BINDINGS = [("escape", "close", "Close"), ("e", "rename", "Rename")]
+    """Pick which Alpaca paper account the TUI reads + acts on (key 'k'),
+    rename a wallet with 'e', or add a NEW wallet with 'a' (paste its API
+    keys — validated live before saving). Returns the chosen wallet name to
+    switch to, or None. Unconfigured wallets (missing creds in .env) are shown
+    but not selectable."""
+    BINDINGS = [("escape", "close", "Close"), ("e", "rename", "Rename"),
+                ("a", "add", "Add wallet")]
 
     # DataTable doesn't consume letter keys — swallow everything except nav +
-    # the rename key so 't'/'f'/etc. can't fire from inside the picker.
+    # the rename/add keys so 't'/'f'/etc. can't fire from inside the picker.
     _PASS_KEYS = {"up", "down", "pageup", "pagedown", "home", "end",
-                  "enter", "escape", "tab", "shift+tab", "e"}
+                  "enter", "escape", "tab", "shift+tab", "e", "a"}
 
     def compose(self) -> ComposeResult:
         with Vertical(id="wallet_dialog"):
@@ -818,9 +1024,12 @@ class WalletModal(ModalScreen[str | None]):
             yield Label("", id="wallet_err")
 
     def on_mount(self) -> None:
+        self._acct_nums: dict[str, str] = {}   # wallet → live account number
         t = self.query_one("#wallettable", DataTable)
-        t.add_columns("", i18n.t("wal.col.wallet"), i18n.t("wal.col.status"))
+        t.add_columns("", i18n.t("wal.col.wallet"), i18n.t("wal.col.account"),
+                      i18n.t("wal.col.status"))
         self._populate()
+        self._probe_accounts()
         t.focus()
 
     def _populate(self) -> None:
@@ -831,9 +1040,37 @@ class WalletModal(ModalScreen[str | None]):
             if winfo["configured"]:
                 status = (i18n.t("wal.active") if winfo["is_current"]
                           else i18n.t("wal.ready"))
+                acct = self._acct_nums.get(winfo["name"], "…")
             else:
                 status = i18n.t("wal.missing", vars=" / ".join(winfo["missing"]))
-            t.add_row(mark, winfo["name"], status, key=winfo["name"])
+                acct = "—"
+            t.add_row(mark, winfo["name"], acct, status, key=winfo["name"])
+
+    @work(thread=True, exclusive=True, group="wallet_probe")
+    def _probe_accounts(self) -> None:
+        """Fill the ACCOUNT column with each configured wallet's LIVE account
+        number (one quick /account call per wallet; '?' on failure). Makes a
+        keypair that points at the wrong Alpaca account visible at a glance —
+        the dashboard shows the same number in its header."""
+        for winfo in wl.list_wallets():
+            if not winfo["configured"]:
+                continue
+            creds = wl.resolve(winfo["name"])
+            acct = wl._probe_account(*creds) if creds else None
+            self._acct_nums[winfo["name"]] = \
+                str((acct or {}).get("account_number") or "?")
+        self.app.call_from_thread(self._refresh_rows)
+
+    def _refresh_rows(self) -> None:
+        if not self.is_mounted:                # modal closed mid-probe
+            return
+        t = self.query_one("#wallettable", DataTable)
+        keep = t.cursor_row
+        self._populate()
+        try:
+            t.move_cursor(row=keep, animate=False)
+        except Exception:
+            pass
 
     def on_key(self, event: events.Key) -> None:
         if event.key not in self._PASS_KEYS:
@@ -847,6 +1084,36 @@ class WalletModal(ModalScreen[str | None]):
             return str(cell_key.row_key.value)
         except Exception:
             return ""
+
+    def action_add(self) -> None:
+        def after(res):
+            if not res:
+                return
+            self.query_one("#wallet_err", Label).update(t("wal.validating"))
+            self._do_add(res)
+        self.app.push_screen(AddWalletModal(), after)
+
+    @work(thread=True, exclusive=True, group="wallet_add")
+    def _do_add(self, res: dict) -> None:
+        ok, msg = wl.add(res["name"], res["key"], res["secret"])
+
+        def done() -> None:
+            err = self.query_one("#wallet_err", Label)
+            if ok:
+                line = t("wal.added", name=res["name"], info=msg)
+                err.update(line)
+                self._populate()
+                self._probe_accounts()         # fetch the new wallet's number
+                # Land the cursor on the new wallet so the natural next Enter
+                # switches to it (the #1 way an order ends up on the wrong book).
+                names = [w["name"] for w in wl.list_wallets()]
+                if res["name"] in names:
+                    self.query_one("#wallettable", DataTable).move_cursor(
+                        row=names.index(res["name"]), animate=False)
+                self.app._log(line)
+            else:
+                err.update(f"[red]{msg}[/]")
+        self.app.call_from_thread(done)
 
     def action_rename(self) -> None:
         old = self._selected_wallet()
@@ -889,24 +1156,28 @@ class CompareScreen(ModalScreen[None]):
     sorted by unrealized P&L). Strictly READ-ONLY: data comes from compare.py's
     per-call-credential fetchers, so it never touches the active-wallet globals
     and can't place orders — no ARM gate needed."""
+    # Full comparison scopes — 3Y/ALL ride Alpaca's 3A/"all" history periods.
+    _WINDOWS = ("1D", "1W", "1M", "3M", "6M", "1Y", "3Y", "ALL")
+
     BINDINGS = [
         ("escape", "close", "Close"),
         ("w", "cycle_window", "Window"),
         ("r", "refetch", "Refresh"),
-    ]
+    ] + [(str(i + 1), f"set_window({i})", w) for i, w in enumerate(_WINDOWS)]
 
     # Same rationale as ManualModal: swallow everything except scroll keys and
     # this screen's own bindings, so 't'/'f'/etc. can't reach the app's trading
     # bindings while the compare page is open.
     _PASS_KEYS = {"up", "down", "pageup", "pagedown", "home", "end",
-                  "escape", "tab", "shift+tab", "w", "r"}
+                  "escape", "tab", "shift+tab", "w", "r",
+                  "1", "2", "3", "4", "5", "6", "7", "8"}
 
     _BAR_W = 22          # max payout bar length (cells)
     _TOP_N = 15          # positions shown per wallet before "… n more"
 
     def __init__(self):
         super().__init__()
-        self._range: str = "1M"        # compare window (w cycles 1D→…→1Y)
+        self._range: str = "1M"        # compare window (digits or w to change)
         # Wallet sections are composed once, in config order, for every
         # DECLARED wallet (unconfigured ones render as a note, keeping ids
         # stable however .env is set up).
@@ -921,7 +1192,7 @@ class CompareScreen(ModalScreen[None]):
                                 zebra_stripes=True)
                 yield Static("", id="cmp_note", classes="cmp-bars")
                 yield Static("[b]ALL WALLETS — equity, normalized to 100 at "
-                             "window start[/]", classes="cmp-head")
+                             "$100k baseline[/]", classes="cmp-head")
                 yield PlotextPlot(id="cmp_overlay", classes="cmp-chart")
                 for i, name in enumerate(self._wnames):
                     yield Static(f"[b]{name}[/]", id=f"cmp_head_{i}",
@@ -936,12 +1207,22 @@ class CompareScreen(ModalScreen[None]):
         self.query_one("#cmp_scroll", VerticalScroll).focus()
         self._set_hint(loading=True)
         self._fetch()
+        # LIVE page: silently re-pull all wallets every 30s while open (the
+        # worker is exclusive, so slow fetches never stack). Scroll position
+        # is preserved — widgets update in place.
+        self.set_interval(30, self._fetch)
 
     def _set_hint(self, loading: bool = False) -> None:
-        state = "[yellow]fetching all wallets…[/]" if loading else "[dim]read-only[/]"
+        as_of = getattr(self, "_as_of", "")
+        state = ("[yellow]fetching all wallets…[/]" if loading else
+                 (f"[green]live · updated {as_of} · auto-refresh 30s[/]"
+                  if as_of else "[dim]read-only[/]"))
+        # Visible scope bar — every window selectable, current one highlighted.
+        bar = "  ".join(f"[b reverse] {w} [/]" if w == self._range else f"[dim]{w}[/]"
+                        for w in self._WINDOWS)
         self.query_one("#cmp_hint", Label).update(
-            f"[b]Wallet comparison[/] — window [b]{self._range}[/]   {state}\n"
-            f"[dim]↑/↓ PgUp/PgDn: scroll · w: cycle window · r: refresh · "
+            f"[b]Wallet comparison[/]   {bar}   {state}\n"
+            f"[dim]1-8 or w: window · ↑/↓ PgUp/PgDn: scroll · r: refresh · "
             f"Esc: close · trade keys disabled here[/]")
 
     def on_key(self, event: events.Key) -> None:
@@ -952,9 +1233,17 @@ class CompareScreen(ModalScreen[None]):
     def action_close(self) -> None:
         self.dismiss(None)
 
+    def action_set_window(self, idx: int) -> None:
+        rng = self._WINDOWS[idx]
+        if rng == self._range:
+            return
+        self._range = rng
+        self._set_hint(loading=True)
+        self._fetch()
+
     def action_cycle_window(self) -> None:
-        idx = _TIMEFRAME_KEYS.index(self._range)
-        self._range = _TIMEFRAME_KEYS[(idx + 1) % len(_TIMEFRAME_KEYS)]
+        idx = self._WINDOWS.index(self._range)
+        self._range = self._WINDOWS[(idx + 1) % len(self._WINDOWS)]
         self._set_hint(loading=True)
         self._fetch()
 
@@ -978,14 +1267,22 @@ class CompareScreen(ModalScreen[None]):
             return "m/d H:M", "%m/%d %H:%M"
         return "m/d", "%m/%d"
 
-    def _hist_labels(self, hist: list[tuple[str, float]], fmt: str
-                     ) -> tuple[list[str], list[float]]:
+    def _hist_labels(self, hist: list[tuple[str, float]], fmt: str,
+                     intraday: bool) -> tuple[list[str], list[float]]:
         """Format history timestamps for plotext; skip unparseable points
-        (a bad label makes plotext raise and kills the plot)."""
+        (a bad label makes plotext raise and kills the plot).
+
+        DAILY points are stamped by Alpaca at 00:00 UTC of the session date
+        but carry that session's CLOSE — converting them to ET shifts every
+        label back a day (07/14's close showed as 07/13). Only intraday
+        windows get the ET conversion; daily windows keep the UTC calendar
+        date."""
         ds, ys = [], []
         for iso, eq in hist:
             try:
-                d = dt.datetime.fromisoformat(iso).astimezone(_ET)
+                d = dt.datetime.fromisoformat(iso)
+                if intraday:
+                    d = d.astimezone(_ET)
             except Exception:
                 continue
             ds.append(d.strftime(fmt))
@@ -993,15 +1290,18 @@ class CompareScreen(ModalScreen[None]):
         return ds, ys
 
     def _populate(self, results: list[dict]) -> None:
+        self._as_of = f"{dt.datetime.now():%H:%M:%S}"
         self._set_hint(loading=False)
         rng = self._range
         by_name = {r["name"]: r for r in results}
 
-        # 1) Leaderboard — ranked by window return, errors/unconfigured last.
+        # 1) Leaderboard — ranked by performance vs the $100k paper baseline;
+        # errors/unconfigured wallets come last.
+        # Slim columns so nothing clips even on a ~75-col terminal; cash /
+        # exposure / position count live in each wallet's section header below.
         tbl = self.query_one("#cmp_table", DataTable)
         tbl.clear(columns=True)
-        tbl.add_columns("#", "WALLET", "EQUITY", "DAY P&L", "DAY %",
-                        f"{rng} RET %", "TOTAL P&L", "CASH", "EXPO", "POS")
+        tbl.add_columns("#", "WALLET", "EQUITY", "DAY", "VS $100K", "TOTAL")
         ranked = sorted(
             (r for r in results if r.get("ok")),
             key=lambda r: (r.get("win_ret") is None,
@@ -1011,41 +1311,45 @@ class CompareScreen(ModalScreen[None]):
             tc = "green" if r["total_pl"] >= 0 else "red"
             wr = r.get("win_ret")
             wr_txt = (Text("n/a", style="dim") if wr is None else
-                      Text(f"{wr:+.2f}%", style="green" if wr >= 0 else "red"))
+                      Text(f"{wr:+.1f}%", style="green" if wr >= 0 else "red"))
             marker = "●" if r["name"] == wl.current() else ""
             tbl.add_row(
                 f"{rank}{marker}", r["name"], f"${r['equity']:,.0f}",
-                Text(f"{r['day_pl']:+,.0f}", style=dc),
-                Text(f"{r['day_pct']:+.2f}%", style=dc),
+                Text(f"{r['day_pl']:+,.0f} {r['day_pct']:+.1f}%", style=dc),
                 wr_txt,
-                Text(f"{r['total_pl']:+,.0f} ({r['total_pct']:+.1f}%)", style=tc),
-                f"${r['cash']:,.0f}", f"{r['exposure']:.2f}x", str(r["npos"]),
+                Text(f"{r['total_pl']:+,.0f} {r['total_pct']:+.1f}%", style=tc),
             )
         broken = [r for r in results if not r.get("ok")]
         for r in broken:
             tbl.add_row("—", r["name"], Text(r.get("err", "error"),
                                              style="yellow"),
-                        "", "", "", "", "", "", "")
-        note = ("[dim]● = active wallet · TOTAL P&L vs $100k paper baseline · "
-                f"{rng} RET % from Alpaca portfolio history[/]")
+                        "", "", "")
+        note = ("[dim]● = active · DAY = today's P&L · TOTAL vs $100k "
+                "baseline · cash/exposure/positions in each wallet's "
+                "section below[/]")
         self.query_one("#cmp_note", Static).update(note)
 
-        # 2) Overlay — every ok wallet's equity, base-100 at window start.
+        # 2) Overlay — every ok wallet's equity, base-100 at the paper-account
+        # baseline. The selected window controls how much history is displayed,
+        # not what starting equity is used for performance math.
         date_form, fmt = self._date_forms(rng)
         overlay = self.query_one("#cmp_overlay", PlotextPlot)
         plt = overlay.plt
         plt.clear_figure()
         plotted = 0
+        latest = ""
         try:
             plt.date_form(date_form)
             for r in ranked:
-                ds, ys = self._hist_labels(r.get("hist", []), fmt)
-                base = next((y for y in ys if y), 0.0)
+                ds, ys = self._hist_labels(r.get("hist", []), fmt,
+                                           rng in ("1D", "1W"))
+                base = r.get("baseline_usd") or cmpw.ACCOUNT_BASELINE_USD
                 if len(ds) < 2 or not base:
                     continue
                 plt.plot(ds, [y / base * 100 for y in ys], label=r["name"])
                 plotted += 1
-            plt.title(f"ALL WALLETS [{rng}] — normalized equity"
+                latest = max(latest, ds[-1])
+            plt.title(f"ALL WALLETS [{rng}] — normalized equity · →{latest}"
                       if plotted else f"ALL WALLETS [{rng}] — no history")
         except Exception:
             plt.clear_figure()
@@ -1070,14 +1374,20 @@ class CompareScreen(ModalScreen[None]):
             wr_txt = "n/a" if wr is None else f"{wr:+.2f}%"
             head.update(
                 f"[b]{name}[/]   equity [b]${r['equity']:,.0f}[/] · "
-                f"{rng} return [b]{wr_txt}[/] · cash ${r['cash']:,.0f} · "
+                f"vs $100k [b]{wr_txt}[/] · cash ${r['cash']:,.0f} · "
                 f"exposure {r['exposure']:.2f}x · {r['npos']} positions")
-            ds, ys = self._hist_labels(r.get("hist", []), fmt)
+            ds, ys = self._hist_labels(r.get("hist", []), fmt,
+                                       rng in ("1D", "1W"))
             try:
                 if len(ds) >= 2:
                     cplt.date_form(date_form)
                     cplt.plot(ds, ys)
-                    cplt.title(f"{name} [{rng}]   ${ys[-1]:,.0f}  ({wr_txt})")
+                    # Explicit data range in the title — sparse axis ticks
+                    # made curves look stale/window-insensitive (young
+                    # accounts show the same full-life curve at every
+                    # window ≥ their age).
+                    cplt.title(f"{name} [{rng}]  ${ys[-1]:,.0f} (vs $100k {wr_txt})"
+                               f"  {ds[0]}→{ds[-1]}")
                 else:
                     cplt.title(f"{name} [{rng}] — no history")
             except Exception:
@@ -1233,7 +1543,10 @@ class AlpacaTUI(App):
         self._names: dict[str, str] = {}       # symbol → company full name (chart title)
         self._bio_cache: dict[str, tuple[str, str]] = {}  # symbol → (name, en_desc)
         self._bio_zh: dict[str, str] = {}      # symbol → 繁體中文 bio translation
+        self._bio_perf: dict[str, dict] = {}   # symbol → {"1M"/"1Y"/"ALL": pct}
         self._bio_sym: str = ""                # symbol currently shown in #bio
+        self._boot_code_mtime: float = _code_mtime()  # stale-window detection
+        self._stale_warned: bool = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -1275,6 +1588,23 @@ class AlpacaTUI(App):
         self._log(t("log.boot2", status=self._schedule_status()))
         self.refresh_data()
         self.set_interval(8, self.refresh_data)
+        self.set_interval(60, self._check_code_freshness)
+        # TUI-owned auto-report: this always-on process IS the scheduler (the
+        # launchd heartbeat has been TCC-dead since ~Jul 5). Same config block
+        # + same dedup stamp as report_scheduler.py, so the two paths can
+        # never double-push.
+        self.set_interval(60, self._report_autopush_tick)
+
+    def _check_code_freshness(self) -> None:
+        """Warn (once, loudly) when the code on disk is newer than this
+        process — the operator is looking at a STALE window and should
+        restart before acting."""
+        if self._stale_warned:
+            return
+        if _code_mtime() > self._boot_code_mtime + 1:
+            self._stale_warned = True
+            self.title = "⚠ " + t("app.title")
+            self._log(t("log.code_stale"))
 
     # ── logging / arm ────────────────────────────────────────────────────────
     def _log(self, msg: str) -> None:
@@ -1399,6 +1729,7 @@ class AlpacaTUI(App):
         # Safety: never carry an armed state across accounts (arm on Main →
         # switch → flatten would hit the wrong book).
         self.armed = False
+        strategies.set_active(name)     # 'n' editor + engines follow the wallet
         # Data for the previous account is now stale — drop every cache and the
         # cursor selection, then force a fresh pull for the new account.
         self._hist_cache.clear()
@@ -1408,7 +1739,7 @@ class AlpacaTUI(App):
         self._candles = []
         self._log(t("log.wallet_switched", name=name))
         if name != wl.default_name():
-            self._log(t("log.wallet_engines", name=wl.default_name()))
+            self._log(t("log.wallet_engines", name=name))
         self.refresh_data()
 
     def action_compare_wallets(self) -> None:
@@ -1520,6 +1851,20 @@ class AlpacaTUI(App):
                 self.query_one("#holdings", DataTable).focus()
                 event.stop()
 
+    @staticmethod
+    def _perf_line(perf: dict, price: float = 0.0) -> str:
+        """Render current price + 1M/1Y/ALL returns ('—' when missing)."""
+        if not perf and price <= 0:
+            return ""
+        def cell(key: str) -> str:
+            v = perf.get(key)
+            if v is None:
+                return "[dim]—[/]"
+            col = "green" if v >= 0 else "red"
+            return f"[{col}]{v:+,.1f}%[/]"
+        px = f"[yellow]${price:,.2f}[/]" if price > 0 else "[dim]—[/]"
+        return t("bio.perf", px=px, m=cell("1M"), y=cell("1Y"), a=cell("ALL"))
+
     @work(thread=True, exclusive=True, group="ticker_bio")
     def _lookup_bio(self, symbol: str) -> None:
         self._bio_sym = symbol
@@ -1529,6 +1874,12 @@ class AlpacaTUI(App):
             name, desc = fetch_company_bio(symbol)
             if desc != "__NO_KEY__" and (name or desc):
                 self._bio_cache[symbol] = (name, desc)
+        # Past-month / past-year / all-time returns (cached per symbol; floats,
+        # so the labels re-render in the current language on 'l' toggle).
+        if symbol not in self._bio_perf:
+            self._bio_perf[symbol] = fetch_ticker_perf(symbol)
+        # Price is fetched FRESH each lookup (returns are cached; price isn't).
+        perf_line = self._perf_line(self._bio_perf[symbol], latest_price(symbol))
         if desc == "__NO_KEY__":
             text = t("bio.no_key")
         elif not name and not desc:
@@ -1542,10 +1893,11 @@ class AlpacaTUI(App):
                 if zh is None:
                     # Show English immediately, then swap in the translation
                     # (one haiku call per symbol; cached after that).
+                    head = f"[b]{name}[/] ({symbol})  [dim]{t('bio.translating')}[/]"
+                    if perf_line:
+                        head += f"\n{perf_line}"
                     self.call_from_thread(
-                        self.query_one("#bio", Static).update,
-                        f"[b]{name}[/] ({symbol})  "
-                        f"[dim]{t('bio.translating')}[/]\n{desc}")
+                        self.query_one("#bio", Static).update, f"{head}\n{desc}")
                     zh = translate_to_zh(desc)
                     if zh:
                         self._bio_zh[symbol] = zh
@@ -1554,6 +1906,14 @@ class AlpacaTUI(App):
                 if symbol != self._bio_sym:   # user moved on mid-translation
                     return
             text = f"[b]{name}[/] ({symbol})\n{shown}"
+        # Perf sits right under the name line (or under the notice for the
+        # no-bio branches) so it never scrolls out with a long description.
+        if perf_line:
+            if "\n" in text:
+                first, rest = text.split("\n", 1)
+                text = f"{first}\n{perf_line}\n{rest}"
+            else:
+                text = f"{text}\n{perf_line}"
         self.call_from_thread(self.query_one("#bio", Static).update, text)
 
     # ── candlestick chart: per-refresh candles of the selected holding, or the
@@ -1751,11 +2111,19 @@ class AlpacaTUI(App):
         self._lmv = lmv
         daypl  = equity - last
         daypct = (daypl / last * 100) if last else 0.0
-        totalpl = equity - 100000.0
-        totalpct = (totalpl / 100000.0) * 100
+        totalpl = equity - cmpw.ACCOUNT_BASELINE_USD
+        totalpct = (totalpl / cmpw.ACCOUNT_BASELINE_USD) * 100
         lev    = (lmv / equity) if equity else 0.0
         pc = "green" if daypl >= 0 else "red"
         tpc = "green" if totalpl >= 0 else "red"
+        # TotalP&L = realized (sold positions, invisible in the table) +
+        # unrealized (the P&L column) — show the split so the column sum
+        # never *looks* inconsistent with the account total again.
+        upl = sum(_f(p.get("unrealized_pl")) for p in positions)
+        rpl = totalpl - upl
+        split = t("sum.split",
+                  rc="green" if rpl >= 0 else "red", rpl=f"{rpl:+,.0f}",
+                  uc="green" if upl >= 0 else "red", upl=f"{upl:+,.0f}")
         self.query_one("#summary", Static).update(
             t("sum.line", equity=f"{equity:,.0f}", stocks=f"{lmv:,.0f}",
               cash=f"{cash:,.0f}", regt=f"{rt:,.0f}", dt=f"{dtbp:,.0f}",
@@ -1763,6 +2131,7 @@ class AlpacaTUI(App):
               tpc=tpc, totalpl=f"{totalpl:+,.0f}", totalpct=f"{totalpct:+.2f}",
               lev=f"{lev:.2f}")
             + f"\n{self._wallet_badge()}  {self._market_badge(clk)}"
+            + f"\n{split}"
         )
 
         # Record time-series data for charts
@@ -1783,8 +2152,14 @@ class AlpacaTUI(App):
         self._repopulate_table()
         n_ord = len(self._open_orders)
         ord_tag = t("log.orders_tag", n=n_ord) if n_ord else ""
-        self._log(t("log.refreshed", n=len(positions), orders=ord_tag,
-                    time=f"{dt.datetime.now():%H:%M:%S}"))
+        # Log the refresh line only when the book actually CHANGES — one line
+        # every 8s buried error/abort messages within ~30s, which is exactly
+        # how failed buys kept looking like "nothing happened".
+        sig = (len(positions), n_ord, wl.current())
+        if sig != getattr(self, "_last_refresh_sig", None):
+            self._last_refresh_sig = sig
+            self._log(t("log.refreshed", n=len(positions), orders=ord_tag,
+                        time=f"{dt.datetime.now():%H:%M:%S}"))
 
     # ── table population (positions or orders) ────────────────────────────────
     def _repopulate_table(self) -> None:
@@ -1927,15 +2302,50 @@ class AlpacaTUI(App):
         self._log(t("log.report_building"))
         self._do_push_report()
 
-    @work(thread=True, exclusive=True, group="report")
-    def _do_push_report(self) -> None:
+    def _report_autopush_tick(self) -> None:
+        """TUI-owned scheduled push. Read-only gates replicate
+        report_scheduler.main() exactly (enabled / weekday / ET window), and
+        the shared .report_schedule_state.json stamp keeps this idempotent
+        across ticks, restarts, AND the (dead) launchd path. Stamp is written
+        only after a successful send, so a failed push retries on the next
+        tick while the window is open."""
         try:
-            res = hr.run_report(
-                push=True,
+            cfg = im.load_config().get("report_schedule", {}) or {}
+        except Exception:
+            return
+        if not cfg.get("enabled"):
+            return
+        now = dt.datetime.now(_ET)
+        if cfg.get("weekdays_only", True) and now.weekday() >= 5:
+            return
+        try:
+            hh, mm = (int(x) for x in str(cfg.get("time_et", "16:00")).split(":"))
+        except ValueError:
+            return
+        target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        minutes_since = (now - target).total_seconds() / 60.0
+        if not (0 <= minutes_since < int(cfg.get("window_minutes", 20))):
+            return
+        if rsched._load_state().get("last_fired_date") == now.strftime("%Y-%m-%d"):
+            return
+        self._log(t("log.report_auto"))
+        self._do_push_report(auto=True, channel=cfg.get("channel"))
+
+    @work(thread=True, exclusive=True, group="report")
+    def _do_push_report(self, auto: bool = False,
+                        channel: str | None = None) -> None:
+        try:
+            res = wr.send_wallets_report(
+                push=True, channel=channel,
                 log=lambda m: self.call_from_thread(self._log, f"[dim]{m}[/]"))
             if res.get("sent"):
+                if auto:
+                    state = rsched._load_state()
+                    state["last_fired_date"] = (
+                        dt.datetime.now(_ET).strftime("%Y-%m-%d"))
+                    rsched._save_state(state)
                 self.call_from_thread(self._log, t("log.report_ok"))
-                self._notify("📑 TUI pushed the full portfolio report")
+                self._notify("📑 TUI pushed the multi-wallet report")
             else:
                 self.call_from_thread(self._log, t("log.report_not_sent"))
         except Exception as e:
@@ -2006,13 +2416,49 @@ class AlpacaTUI(App):
             return
         def after_modal(res):
             if not res:
+                # Always leave a trace — a silently vanished buy is how orders
+                # "disappear" (cancelled modal, Esc, etc.).
+                self._log(t("log.buy_aborted"))
                 return
             sym, amt = res
-            self.push_screen(
-                ConfirmModal(t("confirm.buy", sym=sym, amt=f"{amt:,.0f}")),
-                lambda ok: self._do_order(sym, "buy", amt) if ok else None,
-            )
+            self._prepare_buy(sym, amt)
         self.push_screen(BuyModal(self._cash), after_modal)
+
+    @work(thread=True, group="action")
+    def _prepare_buy(self, sym: str, amt: float) -> None:
+        """Shape the buy for what Alpaca will actually accept. Fractionable
+        assets take dollar (notional) orders; whole-share-only assets (EUV,
+        LAZR, many niche ETFs) reject notional — convert $ → whole shares at
+        the live price and say so in the confirm."""
+        asset = fetch_asset_info(sym)
+        if asset is None or not asset.get("tradable"):
+            self.call_from_thread(
+                self._log,
+                t("log.order_rejected", side="BUY", sym=sym,
+                  reason=t("buy.err_unknown")))
+            return
+        if asset.get("fractionable"):
+            self.call_from_thread(
+                self.push_screen,
+                ConfirmModal(t("confirm.buy", sym=sym, amt=f"{amt:,.0f}")),
+                lambda ok: (self._do_order(sym, "buy", notional=amt) if ok
+                            else self._log(t("log.buy_aborted"))))
+            return
+        price = latest_price(sym)
+        qty = int(amt // price) if price > 0 else 0
+        if qty < 1:
+            self.call_from_thread(
+                self._log,
+                t("buy.err_whole", sym=sym, price=f"{price:,.2f}",
+                  amt=f"{amt:,.0f}"))
+            return
+        est = qty * price
+        self.call_from_thread(
+            self.push_screen,
+            ConfirmModal(t("confirm.buy_shares", sym=sym, qty=qty,
+                           est=f"{est:,.0f}")),
+            lambda ok: (self._do_order(sym, "buy", qty=qty) if ok
+                        else self._log(t("log.buy_aborted"))))
 
     def action_sell(self) -> None:
         if not self._require_armed():
@@ -2045,10 +2491,11 @@ class AlpacaTUI(App):
         self.push_screen(SellModal(sym, pv, self._cash), after_modal)
 
     @work(thread=True, group="action")
-    def _do_order(self, sym: str, side: str, notional: float | None = None) -> None:
+    def _do_order(self, sym: str, side: str, notional: float | None = None,
+                  qty: float | None = None) -> None:
         try:
-            if side == "buy":
-                res = cc.place_market_order(sym, "buy", notional=notional)
+            if side == "buy":                    # notional ($) or whole shares
+                res = cc.place_market_order(sym, "buy", notional=notional, qty=qty)
             elif notional:                       # partial sell by dollar amount
                 res = cc.place_market_order(sym, "sell", notional=notional)
             else:                                # full-position exit
@@ -2058,7 +2505,19 @@ class AlpacaTUI(App):
                     self.call_from_thread(self._log, t("log.no_pos", sym=sym))
                     return
                 res = cc.place_market_order(sym, "sell", qty=qty)
-            oid = res.get("id") or res.get("message") or "?"
+            oid = res.get("id")
+            if not oid:
+                # Alpaca REJECTED the order (unknown/untradable symbol, etc.).
+                # This must never masquerade as success — the old code logged
+                # the rejection message as if it were an order id ("sent →
+                # asset \"EUV\" is…").
+                reason = str(res.get("message") or res)[:140]
+                self.call_from_thread(
+                    self._log,
+                    t("log.order_rejected", side=side.upper(), sym=sym,
+                      reason=reason))
+                self._notify(f"⚠️ TUI {side.upper()} {sym} REJECTED: {reason}")
+                return
             self.call_from_thread(
                 self._log,
                 t("log.order_sent", side=side.upper(), sym=sym, id=str(oid)[:14]))
@@ -2141,5 +2600,39 @@ class AlpacaTUI(App):
         self.call_from_thread(self.refresh_data)
 
 
+def _acquire_single_instance_lock():
+    """One cockpit at a time. Multiple parallel instances caused real damage
+    (buys typed into a forgotten window running 4-day-old code), so a second
+    launch is refused with a pointer to the running one. flock releases
+    automatically when the process dies — no stale-lock cleanup needed."""
+    import fcntl
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tui.lock")
+    f = open(lock_path, "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.seek(0)
+        try:
+            info = json.loads(f.read() or "{}")
+        except Exception:
+            info = {}
+        print(f"Another TUI instance is already running "
+              f"(PID {info.get('pid', '?')}, started {info.get('started', '?')}).")
+        print("Attach to it instead:   tmux attach -t alpaca_tui")
+        print(f"Or close it first (press q in its window, or: "
+              f"kill {info.get('pid', '<pid>')}) and run again.")
+        return None
+    f.truncate(0)
+    f.seek(0)
+    json.dump({"pid": os.getpid(),
+               "started": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}, f)
+    f.flush()
+    return f            # keep the handle (and the lock) for the process lifetime
+
+
 if __name__ == "__main__":
+    import sys
+    _lock = _acquire_single_instance_lock()
+    if _lock is None:
+        sys.exit(1)
     AlpacaTUI().run()

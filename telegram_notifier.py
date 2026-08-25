@@ -204,7 +204,7 @@ if __name__ == "__main__":
     import sys
     if not _is_configured():
         print("⚠️  TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID not set in .env")
-        print("    Add them to /Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.env:")
+        print("    Add them to /Users/peter/GitHub/Alpaca_Paper_Trader/.env:")
         print("      TELEGRAM_BOT_TOKEN=...")
         print("      TELEGRAM_CHAT_ID=...")
         sys.exit(1)

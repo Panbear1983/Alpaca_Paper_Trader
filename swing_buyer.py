@@ -43,20 +43,24 @@ try:
 except ImportError:
     tg = None
 
-STATE_FILE = os.path.join(os.path.dirname(__file__), ".swing_state.json")
+import strategies
+
+
+def _state_file() -> str:              # per-wallet cooldown/dip state
+    return strategies.state_path(".swing_state.json")
 
 
 # ── State ────────────────────────────────────────────────────────────────────
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
+    if os.path.exists(_state_file()):
+        with open(_state_file()) as f:
             return json.load(f)
     return {"last_run_date": None, "dip_adds": {}, "entries": {}}
 
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
+    with open(_state_file(), "w") as f:
         json.dump(state, f, indent=2)
 
 

@@ -1,7 +1,7 @@
 {
-  "version": 3,
-  "last_updated": "2026-08-12",
-  "updated_by": "wall_street_warrior_aggressive",
+  "version": 4,
+  "last_updated": "2026-08-17",
+  "updated_by": "aggressive_mode",
   "tui": {
     "telegram_notify": true,
     "language": "en"
@@ -44,7 +44,7 @@
   },
   "dynamic_exits": {
     "enabled": true,
-    "stop_loss_pct": 0.06,
+    "stop_loss_pct": 0.05,
     "trail_trigger_pct": 0.3,
     "trail_giveback_pct": 0.15,
     "take_profit_levels": [
@@ -68,36 +68,21 @@
   "intraday": {
     "enabled": true,
     "universe": [
-      "NVDA",
-      "TSLA",
-      "AMD",
-      "META",
-      "AAPL",
-      "AVGO",
-      "MSFT",
-      "AMZN",
-      "GOOGL",
-      "NFLX",
-      "SMCI",
-      "COIN",
-      "MU",
-      "QCOM",
-      "CRM",
-      "PLTR",
-      "MRVL",
-      "ARM",
-      "ASML",
-      "INTC",
-      "ADBE",
-      "NOW",
-      "PANW",
-      "ANET",
-      "ORCL"
+      "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AVGO", "ADBE", "CRM",
+      "ORCL", "INTC", "AMD", "QCOM", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MU",
+      "JPM", "BAC", "WFC", "C", "GS", "MS", "AXP", "V", "MA", "PYPL",
+      "JNJ", "PFE", "UNH", "ABT", "TMO", "DHR", "BMY", "AMGN", "GILD", "ABBV",
+      "PG", "KO", "PEP", "WMT", "COST", "HD", "MCD", "NKE", "SBUX", "LOW",
+      "CAT", "HON", "UPS", "RTX", "LMT", "DE", "MM", "GE", "F", "GM",
+      "XOM", "CVX", "COP", "EOG", "SLB", "PSX", "VLO", "MPC",
+      "NEE", "DUK", "SO", "D", "AEP", "EXC", "ES", "FE", "ETR",
+      "PLD", "PSA", "EQIX", "O", "AVB", "EQR", "ESS", "MAA",
+      "LLY", "NVO", "VRTX", "MRK", "REGN", "BAX", "ZTS", "BIIB", "MRNA", "ROK", "TER", "ISRG", "SYK", "GSAT"
     ],
-    "top_n": 8,
+    "top_n": 20,
     "gross_mult": 4.0,
     "stop_pct": 0.025,
-    "flatten_minutes": 10
+    "flatten_minutes": 3
   },
   "scoring_weights": {
     "realized_return_alpha": 0.35,
@@ -154,7 +139,7 @@
       "defense"
     ],
     "sentiment_veto_enabled": false,
-    "autorun_enabled": true
+    "autorun_enabled": false
   },
   "pool": {
     "max_size": 5,
@@ -177,5 +162,20 @@
       "3": 0.13,
       "4": 0.07
     }
+  },
+  "isr_alpha": {
+    "enabled": true,
+    "rebalance_every_minutes": 10,
+    "catalyst_check_every_minutes": 3,
+    "max_positions": 20,
+    "max_sector_pct": 0.4,
+    "max_gross_leverage": 2.5,
+    "base_position_usd": 7500,
+    "max_position_pct": 0.25,
+    "max_turnover_pct": 0.8,
+    "catalyst_threshold": 0.4,
+    "moat_threshold": 7.0,
+    "capex_threshold": 0.7,
+    "min_composite_for_entry": 0.3
   }
 }

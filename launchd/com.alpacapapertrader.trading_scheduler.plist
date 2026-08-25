@@ -17,16 +17,16 @@
          launchctl unload ~/Library/LaunchAgents/com.alpacapapertrader.trading_scheduler.plist -->
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/venv/bin/python3</string>
-    <string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/trading_scheduler.py</string>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/venv/bin/python3</string>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/trading_scheduler.py</string>
   </array>
 
-  <key>WorkingDirectory</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader</string>
+  <key>WorkingDirectory</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader</string>
 
   <key>StartInterval</key><integer>600</integer>
 
-  <key>StandardOutPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.out.log</string>
-  <key>StandardErrorPath</key><string>/Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.err.log</string>
+  <key>StandardOutPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.err.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>

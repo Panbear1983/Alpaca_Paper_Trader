@@ -51,16 +51,19 @@ CT_HEADERS = {
 # ── Config I/O ────────────────────────────────────────────────────────────────
 
 def load_config():
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
+    """The ACTIVE wallet's strategy dict ONLY — this module does whole-dict
+    read-modify-write, so a merged view would leak global keys into the
+    wallet file."""
+    import strategies
+    return strategies.load_strategy()
 
 
 def save_config(cfg, reason):
-    cfg["version"]    += 1
+    import strategies
+    cfg["version"]      = int(cfg.get("version", 0)) + 1
     cfg["last_updated"] = datetime.utcnow().strftime("%Y-%m-%d")
     cfg["updated_by"]   = f"sunday_review: {reason}"
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(cfg, f, indent=2)
+    strategies.update_strategy(lambda _cur: cfg)
 
 
 def load_review_log():

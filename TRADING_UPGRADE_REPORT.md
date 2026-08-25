@@ -109,7 +109,7 @@ rails (regime gate, cash reserve, exposure cap, per-name cap, stop cooldown).
 ## 5. GO-LIVE runbook (nothing trades until you do this)
 
 ```bash
-cd /Users/peter/Desktop/Old_Projects/GitHub/Alpaca_Paper_Trader && source venv/bin/activate
+cd /Users/peter/GitHub/Alpaca_Paper_Trader && source venv/bin/activate
 
 # 1. RECONCILE STATE FIRST (one time, mandatory — prevents double-buys)
 python3 capitol_copier.py --sync-state

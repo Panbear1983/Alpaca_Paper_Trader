@@ -43,10 +43,18 @@ COPY_SKIP = {".git", "__pycache__", ".env", "reports", ".logs",
              "backtest_cache.json", "proposals"}
 DIFF_SKIP = {".git", "__pycache__", "reports", ".logs", ".env",
              "backtest_cache.json", "backtest_results.json", "politician_universe.json",
-             "pool_state.json", "performance_log.json", ".copied_trades.json",
+             "pool_state.json", "performance_log.json", ".copied_trades*.json",
+             ".position_state*.json", ".swing_state*.json", ".intraday_state*.json",
+             ".trading_schedule_state*.json", "strategy_config.json.bak*",
              ".tsla_state.json", ".sentiment_cache.json", ".event_watcher_state.json",
              "politician_history.json", "review_log.json", "vetting_log.json",
              "proposals"}
+
+
+def _skipped(name: str) -> bool:
+    """DIFF_SKIP membership with glob support (per-wallet state files)."""
+    import fnmatch
+    return any(fnmatch.fnmatch(name, pat) for pat in DIFF_SKIP)
 
 CLAUDE_TIMEOUT = 420
 MAX_CHANGED_FILES = 25            # gate: suspicious if more than this
@@ -108,11 +116,11 @@ def collect_changes(sandbox: Path):
     """Return [(rel_path, sandbox_abs, live_abs, is_new)] for code/config changes."""
     changed = []
     for root, dirs, files in os.walk(sandbox):
-        dirs[:] = [d for d in dirs if d not in DIFF_SKIP]
+        dirs[:] = [d for d in dirs if not _skipped(d)]
         for f in files:
             sp = Path(root) / f
             rel = sp.relative_to(sandbox)
-            if any(part in DIFF_SKIP for part in rel.parts):
+            if any(_skipped(part) for part in rel.parts):
                 continue
             lp = REPO / rel
             try:
@@ -155,18 +163,19 @@ def sanity_gate(changed, sandbox: Path) -> list[str]:
             except Exception as e:
                 reasons.append(f"invalid JSON in {rel}: {e}")
 
-    # 5. stop-loss stays protected
-    cfg = sandbox / "strategy_config.json"
-    if cfg.exists():
+    # 5. stop-loss stays protected — every wallet's strategy file
+    for sf in sorted(sandbox.glob("strategy_*.json")):
+        if sf.name == "strategy_config.json":
+            continue
         try:
-            data = json.load(open(cfg))
-            slp = data.get("tsla", {}).get("stop_loss_pct")
+            data = json.load(open(sf))
+            slp = data.get("dynamic_exits", {}).get("stop_loss_pct")
             if slp is None:
-                reasons.append("strategy_config.json lost tsla.stop_loss_pct (downside unprotected)")
+                reasons.append(f"{sf.name} lost dynamic_exits.stop_loss_pct (downside unprotected)")
             elif not (STOP_LOSS_SAFE[0] <= float(slp) <= STOP_LOSS_SAFE[1]):
-                reasons.append(f"tsla.stop_loss_pct {slp} outside safe range {STOP_LOSS_SAFE}")
+                reasons.append(f"{sf.name} stop_loss_pct {slp} outside safe range {STOP_LOSS_SAFE}")
         except Exception as e:
-            reasons.append(f"cannot validate stop_loss_pct: {e}")
+            reasons.append(f"cannot validate stop_loss_pct in {sf.name}: {e}")
 
     return reasons
 

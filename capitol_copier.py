@@ -52,9 +52,16 @@ CT_HEADERS = {
     "RSC":        "1",
 }
 
-STATE_FILE     = os.path.join(os.path.dirname(__file__), ".copied_trades.json")
-CONFIG_FILE    = os.path.join(os.path.dirname(__file__), "strategy_config.json")
-POS_STATE_FILE = os.path.join(os.path.dirname(__file__), ".position_state.json")
+import strategies
+
+# Per-wallet paths, resolved at CALL time via strategies.active() — dedup ids
+# and trail/pyramid state must never be shared across wallets.
+def _state_file() -> str:
+    return strategies.state_path(".copied_trades.json")
+
+
+def _pos_state_file() -> str:
+    return strategies.state_path(".position_state.json")
 
 # Symbols never managed by Capitol Copier (legacy / test holdings)
 NON_CC_SYMBOLS = ("TSLA", "AAPL")
@@ -63,8 +70,8 @@ NON_CC_SYMBOLS = ("TSLA", "AAPL")
 # ── State ────────────────────────────────────────────────────────────────────
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
+    if os.path.exists(_state_file()):
+        with open(_state_file()) as f:
             return json.load(f)
     return {
         "copied":  [],
@@ -76,13 +83,13 @@ def load_state():
 
 def save_state(state):
     state["last_check"] = datetime.now(timezone.utc).isoformat()
-    with open(STATE_FILE, "w") as f:
+    with open(_state_file(), "w") as f:
         json.dump(state, f, indent=2)
 
 
 def load_config():
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
+    """Global app config ∪ the ACTIVE wallet's strategy file."""
+    return strategies.load_merged()
 
 
 # ── Capitol Trades scraper ───────────────────────────────────────────────────
@@ -183,14 +190,14 @@ def get_capitol_exposure():
 # ── Dynamic position management (stop-loss / trail / take-profit / pyramid) ──
 
 def load_pos_state():
-    if os.path.exists(POS_STATE_FILE):
-        with open(POS_STATE_FILE) as f:
+    if os.path.exists(_pos_state_file()):
+        with open(_pos_state_file()) as f:
             return json.load(f)
     return {}
 
 
 def save_pos_state(pstate):
-    with open(POS_STATE_FILE, "w") as f:
+    with open(_pos_state_file(), "w") as f:
         json.dump(pstate, f, indent=2)
 
 
