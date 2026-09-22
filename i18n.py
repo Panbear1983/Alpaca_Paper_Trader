@@ -200,11 +200,19 @@ _TABLE: dict[str, tuple[str, str]] = {
         "scheduler tick (≤20 min)[/]",
         "[dim]Enter=編輯 · r=重新載入 · Esc=關閉 — 變更於下一個排程週期生效"
         "（≤20 分鐘）[/]"),
+    "cfg.unrestricted": ("unrestricted", "不限制"),
+    "cfg.err_empty_list": (
+        "[red]Cannot turn the fence ON with an empty allow list — every buy would be "
+        "blocked. Add names to 'Allowed stocks' first.[/]",
+        "[red]白名單為空時無法開啟圍欄 — 所有買入都會被擋下。"
+        "請先在「允許買入的股票」加入代號。[/]"),
     "edit.current": ("current: [b]{cur}[/]", "目前：[b]{cur}[/]"),
     "edit.range": ("   range: {rng}", "   範圍：{rng}"),
     "danger.eng_swing": ("Swing buyer", "波段買入引擎"),
     "danger.eng_capitol": ("Capitol autorun (exit engine + copies)",
                            "國會自動跟單（出場引擎＋跟單）"),
+    "danger.eng_anchor": ("Anchor fence (allow list + morning-only buys)",
+                          "錨定圍欄（白名單＋僅早盤買入）"),
     "danger.live": ("LIVE", "啟用"),
     "danger.off": ("OFF", "停用"),
     "danger.master": ("{eng} → {state} at the next scheduler tick. Proceed?",
@@ -505,9 +513,14 @@ _SECTION_ZH: dict[str, str] = {
     "SWING": "波段",
     "COPIER": "跟單",
     "SCHED": "排程",
+    "ANCHOR": "錨定",
 }
 
 _FIELD_ZH: dict[str, tuple[str, str]] = {
+    "anchor.universe": (
+        "允許買入的股票（白名單）",
+        "圍欄開啟時只能買入這些代號 — 包含本儀表板的手動買入。圍欄關閉 = 不限制。"
+        "以逗號或空格分隔；空清單會被拒絕（會擋下所有買入）。"),
     "swing.enabled": (
         "波段買入 開/關",
         "每日 RS 動能買入＋逢低加碼。排程器於下一週期套用。"),

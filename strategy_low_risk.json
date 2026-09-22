@@ -1,7 +1,7 @@
 {
   "version": 3,
-  "last_updated": "2026-06-12",
-  "updated_by": "migrate_to_per_wallet: engines OFF for 'Low Risk'",
+  "last_updated": "2026-09-22",
+  "updated_by": "claude: seeded an anchor fence block, OFF with an empty allow list, so the TUI n-screen reads off/unrestricted for this wallet, 2026-09-22",
   "capitol_copier": {
     "trade_size_usd": 1000,
     "max_trade_size_usd": 3000,
@@ -135,5 +135,17 @@
     "copy_time_et": "10:30",
     "window_minutes": 20,
     "weekdays_only": true
+  },
+  "anchor": {
+    "enabled": false,
+    "universe": [],
+    "entry_window_et": [
+      "09:30",
+      "11:30"
+    ],
+    "max_entries_per_name_per_day": 2,
+    "max_entries_per_day": 0,
+    "consecutive_loss_halt": 2,
+    "daily_loss_limit_pct": 3.0
   }
 }

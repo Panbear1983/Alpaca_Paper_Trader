@@ -790,7 +790,15 @@ class StrategyConfigModal(ModalScreen[None]):
             mark = " ⚠" if f.danger else ""
             label = i18n.field_text(f.path, "label") or f.label
             t.add_row(i18n.section_text(f.section), label + mark,
-                      cf.fmt_value(f, val), cf.fmt_range(f), key=f.path)
+                      self._cell(f, val, cfg), cf.fmt_range(f), key=f.path)
+
+    @staticmethod
+    def _cell(f: cf.Field, val, cfg: dict) -> str:
+        """VALUE-column text. The allow list's meaning depends on the fence
+        switch beside it (OFF reads 'unrestricted'), so it needs the whole
+        wallet config, not just its own value — hence not plain fmt_value."""
+        s = cf.fmt_value(f, val, cfg=cfg, compact=True)
+        return i18n.t("cfg.unrestricted") if s == cf.UNRESTRICTED else s
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -820,6 +828,14 @@ class StrategyConfigModal(ModalScreen[None]):
         _, new_val = res
         if new_val == old:
             return
+        # Hard refusal, before any confirm: fence ON + empty list would block
+        # every buy on this wallet, Peter's manual ones included.
+        blocked = cf.enable_blocked_reason(strategies.load_strategy(wl.current()),
+                                           field, new_val)
+        if blocked:
+            self.query_one("#cfg_hint", Label).update(i18n.t("cfg.err_empty_list"))
+            self.app._log(f"[red]cfg {field.path}: refused — {blocked}[/]")
+            return
         prompt = self._danger_prompt(field, new_val)
         if prompt:
             self.app.push_screen(
@@ -832,8 +848,12 @@ class StrategyConfigModal(ModalScreen[None]):
     def _danger_prompt(self, field: cf.Field, new_val) -> str | None:
         """Consequence preview for danger fields; None = no confirm needed."""
         if field.danger == "master":
-            eng = (i18n.t("danger.eng_swing") if field.path.startswith("swing")
-                   else i18n.t("danger.eng_capitol"))
+            if field.path.startswith("anchor"):
+                eng = i18n.t("danger.eng_anchor")
+            elif field.path.startswith("swing"):
+                eng = i18n.t("danger.eng_swing")
+            else:
+                eng = i18n.t("danger.eng_capitol")
             state = i18n.t("danger.live") if new_val else i18n.t("danger.off")
             return i18n.t("danger.master", eng=eng, state=state)
         if field.danger == "prune":
@@ -872,12 +892,24 @@ class StrategyConfigModal(ModalScreen[None]):
         # refresh the row and log the change
         try:
             t = self.query_one("#cfgtable", DataTable)
-            t.update_cell(field.path, self._col_keys[2], cf.fmt_value(field, new_val))
+            cfg = strategies.load_strategy(wl.current())
+            t.update_cell(field.path, self._col_keys[2],
+                          self._cell(field, new_val, cfg))
+            # The allow-list row reads off the fence switch and vice versa, so
+            # refresh both whenever either changes — cell by cell, not a full
+            # repopulate, which would throw the cursor back to the top.
+            if field.path in ("anchor.enabled", "anchor.universe"):
+                for p in ("anchor.enabled", "anchor.universe"):
+                    ff = cf.by_path(p)
+                    if ff:
+                        t.update_cell(p, self._col_keys[2],
+                                      self._cell(ff, cf.get_path(cfg, p), cfg))
+            self.query_one("#cfg_hint", Label).update(i18n.t("cfg.hint"))
         except Exception:
             self._populate()
         self.app._log(i18n.t("log.cfg_changed", path=field.path,
-                             old=cf.fmt_value(field, old),
-                             new=cf.fmt_value(field, new_val)))
+                             old=cf.fmt_value(field, old) or "—",
+                             new=cf.fmt_value(field, new_val) or "—"))
 
 
 class ManualModal(ModalScreen[None]):

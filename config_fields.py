@@ -24,6 +24,12 @@ from sectors import TICKER_SECTOR
 KNOWN_SECTORS = sorted(set(TICKER_SECTOR.values()))
 
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+# A ticker: letter first, then letters/digits/'.'/'-' (BRK.B, BF-B), ≤10 chars.
+_TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+
+# What the allow-list row reads whenever the anchor fence is OFF. English source
+# word (like every label here); the TUI maps it through i18n for zh.
+UNRESTRICTED = "unrestricted"
 
 # danger kinds drive the TUI's consequence previews:
 #   master       — engine on/off switch (goes live/off at next scheduler tick)
@@ -38,7 +44,7 @@ class Field:
     section: str
     path: str            # dotted path into strategy_config.json
     label: str
-    ftype: str           # int | float | bool | time | csv_sectors
+    ftype: str           # int | float | bool | time | csv_sectors | csv_tickers
     lo: float | None = None
     hi: float | None = None
     danger: str = DANGER_NONE
@@ -50,9 +56,13 @@ FIELDS: list[Field] = [
     Field("MASTER", "swing.enabled", "Swing buyer ON/OFF", "bool",
           danger="master",
           desc="Daily RS-momentum buys + dip-adds. Scheduler picks this up next tick."),
-    Field("MASTER", "capitol_copier.autorun_enabled", "Capitol autorun ON/OFF", "bool",
+    Field("MASTER", "capitol_copier.exits_on", "Exit engine ON/OFF", "bool",
           danger="master",
-          desc="Exit engine (20-min stops/trails/TPs/pyramids) + daily disclosure copies."),
+          desc="Stops, trailing stops, take-profits and pyramids. Keep this ON — it is "
+               "what enforces dynamic_exits.stop_loss_pct."),
+    Field("MASTER", "capitol_copier.copy_on", "Disclosure copying ON/OFF", "bool",
+          danger="master",
+          desc="Daily politician disclosure copy loop. Independent of the exit engine."),
 
     # ── RISK RAILS ───────────────────────────────────────────────────────────
     Field("RISK", "pool.max_total_exposure_pct", "Max exposure (frac of equity)", "float",
@@ -64,6 +74,74 @@ FIELDS: list[Field] = [
           desc="No single position may exceed this market value via buys/adds."),
     Field("RISK", "pool.min_position_usd", "Min order size $", "int", 50, 5_000,
           desc="Orders smaller than this are skipped."),
+    Field("RISK", "risk.max_position_pct", "Per-name cap (frac of equity)", "float",
+          0.05, 0.25, danger="exposure",
+          desc="Hard concentration limit enforced in place_market_order() for EVERY "
+               "engine. Code clamps this to 0.25 — raising it here has no effect."),
+    Field("RISK", "risk.max_gross_exposure", "Max gross exposure (x equity)", "float",
+          0.50, 2.00, danger="exposure",
+          desc="Total long market value across the whole book, all engines. Code "
+               "clamps this to 2.00. Stops many mid-sized positions adding up to "
+               "the leverage that a per-name cap alone cannot see."),
+    Field("RISK", "risk.gross_by_regime.bear", "Gross cap in a BEAR market", "float",
+          0.00, 2.00, danger="exposure",
+          desc="Leverage allowed when SPY is below its 200-day average. Deleverages "
+               "on the way into a downturn instead of after it."),
+    Field("RISK", "risk.gross_by_regime.neutral", "Gross cap, NEUTRAL market", "float",
+          0.00, 2.00, danger="exposure",
+          desc="SPY above its 200-day but below its 50-day."),
+    Field("RISK", "risk.hedge_by_regime.bear", "Hedge size in a BEAR market", "float",
+          0.00, 0.50,
+          desc="Share of equity held in the inverse ETF when SPY is below its "
+               "200-day average. 0 in a bull market — a permanent hedge is a drag."),
+    Field("ISR", "isr_alpha.regime_gate", "ISR: no new buys in a bear", "bool",
+          desc="Blocks NEW positions when SPY is below its 200-day average. "
+               "Trimming and exiting continue regardless."),
+
+    # ── ISR ALPHA ────────────────────────────────────────────────────────────
+    # None of these were on the dashboard before, which is why max_turnover_pct
+    # sat at 0.80 unnoticed while the engine churned the book all day.
+    Field("ISR", "isr_alpha.enabled", "ISR Alpha ON/OFF", "bool", danger="master",
+          desc="Catalyst/moat engine. Drives most of this wallet's trading."),
+    Field("ISR", "isr_alpha.max_turnover_pct", "Max turnover per run (frac)", "float",
+          0.05, 0.80, danger="exposure",
+          desc="Share of equity ISR may trade in one rebalance. 0.80 caused the churn."),
+    Field("ISR", "isr_alpha.min_drift_pct", "Min drift to act (frac)", "float", 0.05, 1.0,
+          desc="Leave a holding alone until it is this far from target. Stops "
+               "tiny ranking wobbles causing full round trips."),
+    Field("ISR", "isr_alpha.exit_rank", "Exit rank (hysteresis)", "int", 5, 100,
+          desc="Enter on max_positions, exit only when a name falls out of this "
+               "rank. Prevents sell-and-rebuy at the rank boundary."),
+    Field("ISR", "isr_alpha.max_positions", "Max positions", "int", 3, 40,
+          desc="How many names ISR targets at once."),
+    Field("ISR", "isr_alpha.base_position_usd", "Base position $", "int", 500, 25_000,
+          desc="Starting size before score multipliers. Capped by risk.max_position_pct."),
+
+    # ── ANCHOR PLAN (2026-08-30) ─────────────────────────────────────────────
+    # Five names, first two hours only, enforced in entry_gate.py on every buy.
+    Field("ANCHOR", "anchor.enabled", "Anchor fence ON/OFF", "bool", danger="master",
+          desc="Only the anchor names may be bought, only inside the entry window. "
+               "Off = every engine's old behaviour returns."),
+    # The allow list itself. Peter trades this wallet by hand now (2026-09-22),
+    # and the same fence gates his manual buys, so the list has to be editable
+    # from here rather than by hand-editing JSON. Fence OFF reads 'unrestricted'.
+    Field("ANCHOR", "anchor.universe", "Allowed stocks (allow list)", "csv_tickers",
+          desc="While the fence is ON only these names may be bought — by every engine "
+               "AND by manual buys from this dashboard. Fence OFF = unrestricted. "
+               "Comma or space separated. An empty list is refused: it would block every buy."),
+    Field("ANCHOR", "anchor.max_entries_per_name_per_day", "Entries per name per day", "int", 1, 5,
+          desc="Filled buys allowed per anchor name per session. Counted from Alpaca fills."),
+    Field("ANCHOR", "anchor.max_entries_per_day", "Entries per day, all names (0=off)", "int", 0, 20,
+          desc="Total filled buys per session across the anchors. 0 disables the total cap."),
+    Field("ANCHOR", "anchor.position_pct", "Anchor position size (frac of equity)", "float", 0.05, 0.25,
+          danger="exposure",
+          desc="anchor_trade.py sizes each name to this share of equity. Cannot exceed risk.max_position_pct."),
+    Field("ANCHOR", "anchor.max_stop_pct", "Max initial stop (frac)", "float", 0.01, 0.05,
+          desc="anchor_trade.py clamps WB's stop so it is never further than this below entry."),
+    Field("ANCHOR", "anchor.consecutive_loss_halt", "Halt after N losses in a row", "int", 1, 5,
+          desc="Closed anchor losers in a row today that stop new entries for the session."),
+    Field("ANCHOR", "anchor.daily_loss_limit_pct", "Daily loss halt (%)", "float", 1.0, 5.0,
+          desc="Equity this far below last close = no new buys today. Rule 4 in SOUL.md."),
 
     # ── EXIT ENGINE ──────────────────────────────────────────────────────────
     Field("EXITS", "dynamic_exits.stop_loss_pct", "Stop-loss (frac)", "float", 0.02, 0.25,
@@ -161,7 +239,30 @@ def set_path(cfg: dict, path: str, value) -> dict:
 
 # ── display + validation ─────────────────────────────────────────────────────
 
-def fmt_value(field: Field, value) -> str:
+def fmt_value(field: Field, value, cfg: dict | None = None,
+              compact: bool = False) -> str:
+    """Display text for a value.
+
+    `cfg` (the whole wallet strategy) and `compact` matter only for the allow
+    list: its meaning depends on a *sibling* setting — with the fence OFF the
+    list is irrelevant and reads UNRESTRICTED — and fifteen tickers do not fit
+    a 96-column table row, so the row shows a count plus the first few while
+    the edit dialog (cfg=None, compact=False) shows the full editable list.
+    """
+    if field.ftype == "csv_tickers":
+        names = ([str(v).upper() for v in value] if isinstance(value, list)
+                 else ([str(value).upper()] if value else []))
+        if cfg is not None and not get_path(cfg, "anchor.enabled"):
+            return UNRESTRICTED
+        if not names:
+            # Fence ON with nothing allowed = every buy blocked. Say so loudly
+            # in the table; in the edit box just leave it empty to type into.
+            return "⚠ empty — every buy blocked" if cfg is not None else ""
+        if not compact:
+            return ", ".join(names)
+        shown = names if len(names) <= 6 else names[:5]
+        tail = "" if len(names) <= 6 else " …"
+        return f"{len(names)} names: {' '.join(shown)}{tail}"
     if value is None:
         return "—"
     if field.ftype == "bool":
@@ -180,6 +281,8 @@ def fmt_range(field: Field) -> str:
         return "HH:MM"
     if field.ftype == "csv_sectors":
         return "csv"
+    if field.ftype == "csv_tickers":
+        return "tickers"
     if field.lo is not None and field.hi is not None:
         return f"{field.lo:g}–{field.hi:g}"
     return ""
@@ -211,6 +314,22 @@ def validate(field: Field, raw: str) -> tuple[bool, object]:
             return False, f"unknown sector(s): {', '.join(bad)} — known: {', '.join(KNOWN_SECTORS)}"
         return True, parts
 
+    if field.ftype == "csv_tickers":
+        parts = [p.strip().upper() for p in re.split(r"[,\s;]+", raw) if p.strip()]
+        if not parts:
+            return False, ("enter at least one ticker — to lift all restrictions, turn "
+                           "the Anchor fence OFF instead (the row then reads "
+                           f"'{UNRESTRICTED}')")
+        bad = [p for p in parts if not _TICKER_RE.match(p)]
+        if bad:
+            return False, (f"not a valid ticker: {', '.join(bad)} — letters/digits "
+                           "only, e.g. AAPL, BRK.B")
+        seen: list[str] = []
+        for p in parts:            # dedupe, keep the order typed
+            if p not in seen:
+                seen.append(p)
+        return True, seen
+
     # numeric
     try:
         val = int(raw) if field.ftype == "int" else float(raw)
@@ -221,3 +340,19 @@ def validate(field: Field, raw: str) -> tuple[bool, object]:
     if field.hi is not None and val > field.hi:
         return False, f"maximum is {field.hi:g}"
     return True, val
+
+
+def enable_blocked_reason(cfg: dict, field: Field, new_val) -> str | None:
+    """A change that must be refused outright — no confirm, no save — or None.
+
+    The fence blocks every buy whose name is not on the list, so turning it ON
+    while the list is empty blocks ALL buying, manual buys included. Nobody
+    ever means that. The sanctioned way to lift restrictions is fence OFF,
+    which the table shows as UNRESTRICTED. (An empty list can't be *saved*
+    either — validate() refuses it — so this is the one remaining gap.)
+    """
+    if field.path == "anchor.enabled" and new_val:
+        if not (get_path(cfg, "anchor.universe") or []):
+            return ("cannot turn the fence ON with an empty allow list — every buy "
+                    "would be blocked; add names to 'Allowed stocks' first")
+    return None
