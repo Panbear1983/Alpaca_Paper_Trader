@@ -199,9 +199,16 @@ class OrderRejected(Exception):
     """Raised when an order would breach the concentration cap."""
 
 
-def _max_position_pct():
-    """Configured cap, clamped to the active wallet's code ceiling."""
-    ceiling = _hard()["position_pct"]
+def _max_position_pct(ceiling=None):
+    """Configured cap, clamped to the active wallet's code ceiling.
+
+    `ceiling` is only overridden by _trim_to_caps, which clamps to the OLD
+    module-wide figure instead: the per-wallet ceiling binds new buys the
+    moment it lands in code, but it must never sell anything by itself. A
+    trim happens only when the wallet's own config asks for it (plan step 8).
+    """
+    if ceiling is None:
+        ceiling = _hard()["position_pct"]
     try:
         v = float((load_config().get("risk") or {}).get("max_position_pct", ceiling))
     except Exception:
@@ -252,8 +259,9 @@ def current_regime():
         return "unknown"
 
 
-def _max_gross_exposure():
-    """Configured gross limit, scaled by market regime, clamped to the ceiling.
+def _max_gross_exposure(ceiling=None):
+    """Configured gross limit, scaled by market regime, clamped to the ceiling
+    (`ceiling` overridden only by _trim_to_caps — see _max_position_pct).
 
     Deleveraging happens on the way INTO a downturn rather than after one. The
     regime can only ever reduce the limit — never raise it past
@@ -263,7 +271,8 @@ def _max_gross_exposure():
     This blocks new buys only. Nothing here forces a sale, so a regime flip
     never liquidates an existing book.
     """
-    ceiling = _hard()["gross"]
+    if ceiling is None:
+        ceiling = _hard()["gross"]
     try:
         risk = load_config().get("risk") or {}
         v = float(risk.get("max_gross_exposure", ceiling))
@@ -606,12 +615,17 @@ def _trim_to_caps(positions, equity, dry_run, acts):
        non-anchor names are cut pro-rata until it is under.
     Shares come from qty_available (Alpaca rejects a sell above it while an
     open order exists) and are rounded to 4 dp like the take-profit path.
+
+    The caps used HERE are the wallet's configured ones (clamped only to the
+    old module-wide 1.0 / 2.0), not the per-wallet code ceiling: landing a
+    ceiling in code must never liquidate part of the book on its own. Setting
+    the config to the ceiling (plan step 8) is what triggers the trims.
     """
     import math
     if not equity or equity <= 0 or not positions:
         return 0
     tag = "[DRY] " if dry_run else ""
-    name_cap = equity * _max_position_pct()
+    name_cap = equity * _max_position_pct(ceiling=_DEFAULT_HARD["position_pct"])
     sent = 0
     book = {}
     for p in positions:
@@ -637,7 +651,7 @@ def _trim_to_caps(positions, equity, dry_run, acts):
             book[sym]["mv"] -= qty * px
             book[sym]["avail"] -= qty
             sent += 1
-    gross_cap = equity * _max_gross_exposure()
+    gross_cap = equity * _max_gross_exposure(ceiling=_DEFAULT_HARD["gross"])
     gross = sum(b["mv"] for b in book.values())
     if gross > gross_cap * 1.005:
         anchors = _anchor_names()

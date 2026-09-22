@@ -64,3 +64,40 @@ def test_nonsense_config_falls_back_to_the_wallets_ceiling(monkeypatch):
 def test_hard_limits_for_exposes_rows_for_the_tui():
     assert cc.hard_limits_for("High Risk") == {"position_pct": 0.25, "gross": 1.0}
     assert cc.hard_limits_for("Low Risk") is None
+
+
+# ── the ceiling binds buys, never sells (2026-09-22 fix) ─────────────────────
+
+def _book(equity=71_000):
+    """TSLA 43%, NVDA 29% of equity — the real High Risk book on 2026-09-22."""
+    return [{"symbol": "TSLA", "market_value": str(equity * 0.43), "current_price": "340", "qty": "82.5",
+             "qty_available": "82.5"},
+            {"symbol": "NVDA", "market_value": str(equity * 0.29), "current_price": "220", "qty": "92.3",
+             "qty_available": "92.3"}]
+
+
+def _trim(monkeypatch, wallet, risk):
+    _use(monkeypatch, wallet, risk)
+    monkeypatch.setattr(cc, "_sellable_qty", lambda p: float(p["qty"]))
+    monkeypatch.setattr(cc, "place_market_order", lambda *a, **k: (_ for _ in ()).throw(AssertionError("order sent")))
+    acts = []
+    n = cc._trim_to_caps(_book(), 71_000, True, acts)
+    return n, acts
+
+
+def test_landing_the_code_ceiling_trims_nothing_by_itself(monkeypatch):
+    n, acts = _trim(monkeypatch, "High Risk", {"max_position_pct": 1.0, "max_gross_exposure": 2.0})
+    assert n == 0 and acts == []
+
+
+def test_setting_the_config_to_the_ceiling_is_what_trims(monkeypatch):
+    n, acts = _trim(monkeypatch, "High Risk", {"max_position_pct": 0.25, "max_gross_exposure": 1.0})
+    assert n == 2
+    assert any("TSLA" in a for a in acts) and any("NVDA" in a for a in acts)
+
+
+def test_benchmark_wallet_trim_behaviour_unchanged(monkeypatch):
+    n, acts = _trim(monkeypatch, "Low Risk", {"max_position_pct": 1.0, "max_gross_exposure": 2.0})
+    assert n == 0 and acts == []
+    n, acts = _trim(monkeypatch, "Low Risk", {"max_position_pct": 0.30, "max_gross_exposure": 2.0})
+    assert n == 1 and "TSLA" in acts[0]
