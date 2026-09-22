@@ -328,7 +328,11 @@
       "NVDA"
     ],
     "broker_stops": true,
-    "earnings_warn_days": 2
+    "earnings_warn_days": 2,
+    "cooling_off_pct": 8.0,
+    "cooling_off_days": 5,
+    "max_open_names": 5,
+    "min_cash_pct": 0.2
   },
   "price_watcher": {
     "buyback_mode": "notify"

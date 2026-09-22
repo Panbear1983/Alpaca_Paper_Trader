@@ -215,6 +215,11 @@ def render(now, st, regime, rows, cfg):
         flags.append("DAILY LOSS HALT — no new entries")
     if st.get("loss_halt"):
         flags.append("LOSS-STREAK HALT — no new entries")
+    co = st.get("cooling_off") or {}
+    if co.get("paused"):
+        flags.append(f"COOLING OFF — no new buys until {co.get('resume_on', '?')}")
+    if st.get("max_open_names") and len(st.get("open_names") or []) >= int(st["max_open_names"]):
+        flags.append(f"NAME CAP — {len(st['open_names'])}/{st['max_open_names']} held, no new names")
     if regime == "bear":
         flags.append("BEAR REGIME — no longs")
     if st.get("market_open") is False:

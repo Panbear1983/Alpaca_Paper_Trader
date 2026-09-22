@@ -444,7 +444,8 @@ def _log_manual_trade(ticker, side, notional, qty, order):
 
 def _entry_gate(ticker, side, notional=None, qty=None):
     """The anchor-plan fence (entry_gate.py): universe, entry window, daily-loss
-    halt, entries-per-name, consecutive-loss halt. Buy-only, like the caps.
+    halt, cooling-off pause, concurrent-name cap, cash floor, entries-per-name,
+    consecutive-loss halt. Buy-only, like the caps.
     Fails closed: if the gate itself cannot run, a buy does not go through."""
     try:
         import entry_gate

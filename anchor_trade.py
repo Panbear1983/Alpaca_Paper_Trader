@@ -168,6 +168,15 @@ def cmd_status() -> int:
     used = st.get("entries_today") or {}
     print("entries used today: " + (", ".join(f"{k} {v}" for k, v in sorted(used.items())) or "none"))
     print(f"loss streak today: {st['loss_streak']}  {'HALTED (consecutive losses)' if st['loss_halt'] else ''}")
+    co = st.get("cooling_off")
+    if co:
+        print("cooling-off: " + (f"PAUSED — {co.get('reason')}" if co.get("paused")
+                                 else f"clear ({co.get('drop_pct', 0):.1f}% under the 20-day high)"))
+    if st.get("max_open_names"):
+        names = st.get("open_names") or []
+        print(f"names held: {len(names)}/{st['max_open_names']}  ({', '.join(names) or 'none'})")
+    if st.get("min_cash_pct") is not None and st.get("cash_pct") is not None:
+        print(f"cash: {st['cash_pct']:.1f}% of equity  (floor {st['min_cash_pct'] * 100:.0f}%)")
     for e in st.get("errors") or []:
         print(f"warning: {e}")
     rows = aj.open_rows()

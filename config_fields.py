@@ -215,6 +215,16 @@ FIELDS: list[Field] = [
     Field("ANCHOR", "anchor.earnings_warn_days", "Earnings warning lead (sessions)", "int", 0, 5,
           desc="Morning report and evening check flag any held name reporting within this "
                "many sessions. An earnings gap jumps straight through a stop. 0 = off."),
+    Field("ANCHOR", "anchor.cooling_off_pct", "Cooling-off trigger (% below 20-day high)", "float", 3.0, 15.0,
+          desc="Equity this far below its 20-day high pauses NEW buys (sells and stops keep "
+               "working). Re-arms only after a new high is made. 0 = off."),
+    Field("ANCHOR", "anchor.cooling_off_days", "Cooling-off length (sessions)", "int", 1, 20,
+          desc="How many trading days the pause lasts once triggered."),
+    Field("ANCHOR", "anchor.max_open_names", "Max names held at once", "int", 1, 15,
+          desc="A buy of a NEW name is refused when this many are already held. The allow "
+               "list is a menu, not a portfolio. 0 = off."),
+    Field("ANCHOR", "anchor.min_cash_pct", "Cash floor (frac of equity)", "float", 0.0, 0.5,
+          desc="A buy that would take cash below this share of equity is refused. 0 = off."),
 
     # ── SCHEDULER ────────────────────────────────────────────────────────────
     Field("SCHED", "trading_schedule.manage_every_minutes", "Exit engine cadence (min)", "int",

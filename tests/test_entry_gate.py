@@ -20,7 +20,8 @@ def _order(sym, side="buy", status="filled"):
 
 
 def _setup(monkeypatch, account=None, orders=None, clock=None, journal=None):
-    eg._CACHE.update({"t": 0.0, "account": None, "orders": None, "clock": None})
+    eg._CACHE.update({"t": 0.0, "account": None, "orders": None, "clock": None,
+                      "history": None, "positions": None})
     monkeypatch.setattr(eg, "fetch_account", lambda: account or {"equity": "70000", "last_equity": "70000"})
     monkeypatch.setattr(eg, "fetch_todays_orders", lambda now: orders or [])
     monkeypatch.setattr(eg, "fetch_clock", lambda: clock or {"is_open": True})
