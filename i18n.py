@@ -526,6 +526,7 @@ _SECTION_ZH: dict[str, str] = {
     "COPIER": "跟單",
     "SCHED": "排程",
     "ANCHOR": "錨定",
+    "WATCHER": "看守",
 }
 
 _FIELD_ZH: dict[str, tuple[str, str]] = {
@@ -537,6 +538,13 @@ _FIELD_ZH: dict[str, tuple[str, str]] = {
         "核心持股（不動）",
         "連五漲規則與分批停利不會賣出這些代號。在持倉表按 C 切換。"
         "部位上限與移動停損仍然適用。留白 = 無。"),
+    "anchor.earnings_warn_days": (
+        "財報預警提前天數（交易日）",
+        "持股在此交易日數內公布財報時，晨報與收盤檢查會提醒。跳空會直接穿越停損。0 = 關閉。"),
+    "price_watcher.buyback_mode": (
+        "停損後回補模式",
+        "被停損的股票跌破舊成本 20% 時：notify = 每日一次 Telegram 提醒、不下單（預設）；"
+        "trade = 舊的自動買回（仍經過所有關卡）；off = 不動作。"),
     "swing.enabled": (
         "波段買入 開/關",
         "每日 RS 動能買入＋逢低加碼。排程器於下一週期套用。"),

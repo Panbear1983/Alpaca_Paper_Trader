@@ -231,6 +231,19 @@ def run_check(push: bool = True) -> list[str]:
     except Exception as e:
         breaches.append(f"anchor check could not run: {e}")
 
+    # Earnings ahead for a held name (2026-09-22). Not a breach of anything,
+    # but the one risk no stop can catch — worth the evening text.
+    try:
+        import earnings_calendar as ec
+        import strategies
+        lead = int((strategies.load_merged("High Risk").get("anchor") or {}).get("earnings_warn_days", 2))
+        held = [h.get("sym") for h in (d.get("held") or []) if h.get("sym")]
+        line = ec.notice(held, sess, lead)
+        if line:
+            breaches.append(line)
+    except Exception:
+        pass
+
     hist = history(2)
     try:
         import market_context as mc

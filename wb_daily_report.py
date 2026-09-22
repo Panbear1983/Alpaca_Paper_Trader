@@ -481,8 +481,20 @@ def _holiday_notice(key: str, secret: str, base: str, sess: str) -> str:
             + (f" — next session {when}." if when else "."))
 
 
+def _earnings_notice(held: list, sess: str) -> str:
+    """One line when a held name reports within anchor.earnings_warn_days
+    sessions. Same posture as the holiday notice: silent unless it matters,
+    and never a reason for the report not to go out."""
+    try:
+        import earnings_calendar as ec
+        lead = int((strategies.load_merged("High Risk").get("anchor") or {}).get("earnings_warn_days", 2))
+        return ec.notice([x["sym"] for x in held], sess, lead)
+    except Exception:
+        return ""
+
+
 def build_brief_report(d: Dict[str, Any], assessment: str = "",
-                       tomorrow: str = "", holiday: str = "") -> str:
+                       tomorrow: str = "", holiday: str = "", earnings: str = "") -> str:
     """High Risk only, target <=100 words."""
     L: List[str] = []
     L.append(f"📊 *High Risk* — Session {d.get('session','?')} (ET)")
@@ -526,6 +538,9 @@ def build_brief_report(d: Dict[str, Any], assessment: str = "",
     if holiday:
         L.append("")
         L.append(holiday)
+    if earnings:
+        L.append("")
+        L.append(earnings)
     note = _review_due()
     if note:
         L.append("")
@@ -597,7 +612,7 @@ def _spell(sym: str) -> str:
 
 def speakable(d: Dict[str, Any], assessment: str = "", outlook: str = "",
               oversight: str = "", proposals: "list | None" = None,
-              weekly: bool = False, holiday: str = "") -> str:
+              weekly: bool = False, holiday: str = "", earnings: str = "") -> str:
     """A spoken script built from the data, not from the markdown.
 
     Reading the rendered report aloud would say "asterisk", the bullet
@@ -653,6 +668,8 @@ def speakable(d: Dict[str, Any], assessment: str = "", outlook: str = "",
         parts.append("Outlook. " + despell(outlook))
     if holiday:
         parts.append(re.sub(r"^[^\w]+", "", holiday).strip())
+    if earnings:
+        parts.append(despell(re.sub(r"^[^\w]+", "", earnings).strip()))
     if oversight:
         parts.append(("Weekly assessment." if weekly else "Oversight.") + " " + despell(oversight))
         for p in (proposals or []):
@@ -925,15 +942,18 @@ def send_brief_report(push: bool = True, channel: str | None = None, log=print,
         log("[2/3] Analyst skipped.")
         _, ctx = _facts_block(d)
 
-    holiday = ""
+    holiday = earnings = ""
     if d.get("ok"):
         creds = wallets.resolve(wallet)
         if creds:
             holiday = _holiday_notice(*creds, sess)
             if holiday:
                 log(f"✓ {holiday}")
+        earnings = _earnings_notice(d.get("held") or [], sess)
+        if earnings:
+            log(f"✓ {earnings}")
 
-    report = build_brief_report(d, a, t_, holiday)
+    report = build_brief_report(d, a, t_, holiday, earnings)
 
     # Claude's oversight read, appended so Peter gets ONE morning message rather
     # than two. Bounded and optional by design: if it is slow or fails, the
@@ -980,7 +1000,7 @@ def send_brief_report(push: bool = True, channel: str | None = None, log=print,
         log("[3/4] Recording voice note…")
         ogg = render_voice(speakable(d, a, t_, oversight=ov_text,
                                      proposals=ov_proposals, weekly=_is_weekly,
-                                     holiday=holiday), sess)
+                                     holiday=holiday, earnings=earnings), sess)
         log(f"✓ Voice: {ogg}" if ogg else "⚠ voice unavailable — text only")
 
     sent = False

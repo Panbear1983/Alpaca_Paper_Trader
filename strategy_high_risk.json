@@ -1,7 +1,7 @@
 {
   "version": 8,
   "last_updated": "2026-09-22",
-  "updated_by": "claude: broker-side trailing-stop guards ON for High Risk (Step 2), 2026-09-22",
+  "updated_by": "claude: buy-back \u2192 notify only; earnings warning 2 sessions ahead (Steps 5+6), 2026-09-22",
   "tui": {
     "telegram_notify": true,
     "language": "en"
@@ -327,6 +327,10 @@
     "core_holds": [
       "NVDA"
     ],
-    "broker_stops": true
+    "broker_stops": true,
+    "earnings_warn_days": 2
+  },
+  "price_watcher": {
+    "buyback_mode": "notify"
   }
 }

@@ -140,6 +140,42 @@ def _stop_frac(symbol: str) -> float:
     return STOP_LOSS_PCT
 
 
+# ── Buy-back mode (price_watcher block of strategy_high_risk.json) ────────────
+
+_WATCHER_CFG = {"t": 0.0, "cfg": {}}
+
+
+def _watcher_cfg():
+    """price_watcher block of strategy_high_risk.json, re-read at most once a
+    minute — this process never restarts, so a config edit must be seen live."""
+    now = time.time()
+    if now - _WATCHER_CFG["t"] > 60:
+        try:
+            with open('/Users/peter/GitHub/Alpaca_Paper_Trader/strategy_high_risk.json') as f:
+                _WATCHER_CFG["cfg"] = (json.load(f).get("price_watcher") or {})
+        except Exception as e:
+            print(f"[watcher] could not read config: {e}")
+        _WATCHER_CFG["t"] = now
+    return _WATCHER_CFG["cfg"]
+
+
+def buyback_decision(mode: str, notified_date: str | None, today: str) -> str | None:
+    """What to do when a stopped-out name is 20% below its old entry.
+
+    'trade'  → the original automatic buy (still through every gate).
+    'notify' → a Telegram line, once per symbol per day, no order.  (default)
+    'off'    → nothing.
+    Peter trades by hand now (2026-09-22): a machine buying a falling stock
+    without asking was the wrong default for that.
+    """
+    mode = (mode or "notify").lower()
+    if mode == "trade":
+        return "trade"
+    if mode == "notify":
+        return None if notified_date == today else "notify"
+    return None
+
+
 # ── Anchor plan manager ───────────────────────────────────────────────────────
 
 _ANCHOR_CFG = {"t": 0.0, "cfg": {}}
@@ -429,6 +465,25 @@ def main():
                     continue
                 # If price dropped >= BUY_BACK_PCT from entry price, consider buying
                 if (current_price - entry_price) / entry_price <= -BUY_BACK_PCT:
+                    today_et = _now_iso()[:10]
+                    verdict = buyback_decision(_watcher_cfg().get("buyback_mode", "notify"),
+                                               entry_info.get("buyback_notified_date"), today_et)
+                    if verdict is None:
+                        continue
+                    if verdict == "notify":
+                        drop = (current_price / entry_price - 1) * 100
+                        print(f"[watcher] BUY-BACK CANDIDATE (notify only): {symbol} @ {current_price:.2f}, "
+                              f"{drop:.1f}% below the old entry {entry_price:.2f}")
+                        try:
+                            import telegram_notifier as tn
+                            tn.notify_position_alert(
+                                symbol, f"now {drop:.0f}% below your old entry ({entry_price:.2f} → "
+                                        f"{current_price:.2f}). Buy-back candidate — nothing was bought.",
+                                "info")
+                            state[symbol]["buyback_notified_date"] = today_et
+                        except Exception as e:
+                            print(f"[watcher]   notify failed: {e}")
+                        continue
                     # Determine order size: use base position size, but limit by available cash
                     cash = get_account_equity() or 0
                     # Use a fraction of equity? We'll just use base position size, but ensure we don't exceed cash

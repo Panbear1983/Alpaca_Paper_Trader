@@ -44,11 +44,12 @@ class Field:
     section: str
     path: str            # dotted path into strategy_config.json
     label: str
-    ftype: str           # int | float | bool | time | csv_sectors | csv_tickers | csv_tickers_opt
+    ftype: str           # int | float | bool | time | csv_sectors | csv_tickers | csv_tickers_opt | choice
     lo: float | None = None
     hi: float | None = None
     danger: str = DANGER_NONE
     desc: str = ""
+    choices: tuple = ()  # for ftype "choice": the allowed words
 
 
 FIELDS: list[Field] = [
@@ -205,6 +206,16 @@ FIELDS: list[Field] = [
     Field("COPIER", "capitol_copier.target_sectors", "Target sectors (csv)", "csv_sectors",
           desc="Whitelist for NEW copy buys. Known: " + ", ".join(KNOWN_SECTORS)),
 
+    # ── PRICE WATCHER (High Risk guardrails, 2026-09-22) ─────────────────────
+    Field("WATCHER", "price_watcher.buyback_mode", "Buy-back after a stop-out", "choice",
+          choices=("notify", "trade", "off"),
+          desc="When a stopped-out name falls 20% below its old entry: notify = Telegram "
+               "once a day, no order (default); trade = the old automatic buy, through every "
+               "gate; off = nothing."),
+    Field("ANCHOR", "anchor.earnings_warn_days", "Earnings warning lead (sessions)", "int", 0, 5,
+          desc="Morning report and evening check flag any held name reporting within this "
+               "many sessions. An earnings gap jumps straight through a stop. 0 = off."),
+
     # ── SCHEDULER ────────────────────────────────────────────────────────────
     Field("SCHED", "trading_schedule.manage_every_minutes", "Exit engine cadence (min)", "int",
           5, 120,
@@ -300,6 +311,8 @@ def fmt_range(field: Field) -> str:
         return "tickers"
     if field.ftype == "csv_tickers_opt":
         return "tickers or blank"
+    if field.ftype == "choice":
+        return "/".join(field.choices)
     if field.lo is not None and field.hi is not None:
         return f"{field.lo:g}–{field.hi:g}"
     return ""
@@ -321,6 +334,12 @@ def validate(field: Field, raw: str) -> tuple[bool, object]:
         if _TIME_RE.match(raw):
             return True, raw
         return False, "time must be HH:MM (24h)"
+
+    if field.ftype == "choice":
+        low = raw.lower()
+        if low in field.choices:
+            return True, low
+        return False, "one of: " + ", ".join(field.choices)
 
     if field.ftype == "csv_sectors":
         parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
