@@ -23,7 +23,7 @@ from typing import Any
 
 import requests
 
-from capitol_copier import BASE_URL, ALPACA_HEADERS, DATA_URL
+from capitol_copier import BASE_URL, ALPACA_HEADERS, DATA_URL, core_holds
 import telegram_notifier as tn
 
 STATE_FILE = Path(__file__).with_name("diary") / "sell_stop_state.json"
@@ -74,27 +74,47 @@ def _sell(symbol: str, frac: float = 1.0) -> dict:
     return {"symbol": symbol, "frac": frac, "stdout": result.stdout, "stderr": result.stderr, "rc": result.returncode}
 
 
-def _warn_fourth_day(symbol: str, streak: int, current_price: float, streak_start_price: float) -> bool:
+def _warn_fourth_day(symbol: str, streak: int, current_price: float, streak_start_price: float,
+                     is_core: bool = False) -> bool:
     """Send Telegram warning on 4th consecutive up day."""
     if streak != 4 or not streak_start_price:
         return False
     gain_pct = (current_price - streak_start_price) / streak_start_price * 100.0
+    tail = ("★ CORE hold — this rule will NOT sell it (unmark with C in the dashboard to change that)"
+            if is_core else
+            "Tomorrow (5th up day) triggers: >15% = sell all, >5% = sell half")
     msg = (
         f"⚠️ *Sell Stop Warning — 4th Consecutive Up Day*\n"
         f"*{symbol}* — {streak} days up, gain from streak start: {gain_pct:+.2f}%\n"
         f"Current: ${current_price:.2f} | Streak start: ${streak_start_price:.2f}\n"
-        f"Tomorrow (5th up day) triggers: >15% = sell all, >5% = sell half"
+        f"{tail}"
     )
     return tn.send(msg)
 
 
-def run_check(now: datetime | None = None) -> dict:
+def decide(streak: int, gain_pct: float, is_core: bool) -> str:
+    """The rule as a pure function — 'sell_all' | 'sell_half' | 'hold' |
+    'core_hold' | 'none'. CORE holds are never sold by this rule; they still
+    get the day-4 warning so Peter knows the streak is there."""
+    if streak < 5:
+        return "none"
+    if is_core:
+        return "core_hold"
+    if gain_pct > 15:
+        return "sell_all"
+    if gain_pct > 5:
+        return "sell_half"
+    return "hold"
+
+
+def run_check(now: datetime | None = None, dry_run: bool = False) -> dict:
     """
     Main entry point. Call once per trading day after the close (or before next open).
-    Returns a summary of actions taken.
+    Returns a summary of actions taken. dry_run reports what it WOULD do and sells nothing.
     """
     now = (now or datetime.now(ET)).astimezone(ET)
     today = now.date()
+    core = core_holds()
 
     # Only run on trading weekdays
     if today.weekday() >= 5:
@@ -147,42 +167,43 @@ def run_check(now: datetime | None = None) -> dict:
         sym_state["streak_start_price"] = streak_start_price
         state[sym] = sym_state
 
+        is_core = sym in core
+
         # 4th day warning (once per streak)
         if streak == 4 and not sym_state.get("warned_day4") and streak_start_price:
-            warned = _warn_fourth_day(sym, streak, current_price, streak_start_price)
+            warned = True if dry_run else _warn_fourth_day(sym, streak, current_price, streak_start_price, is_core)
             if warned:
                 sym_state["warned_day4"] = True
-                actions.append({"symbol": sym, "action": "warn_day4", "gain_pct": (current_price - streak_start_price) / streak_start_price * 100.0})
+                actions.append({"symbol": sym, "action": "warn_day4", "core": is_core,
+                                "gain_pct": (current_price - streak_start_price) / streak_start_price * 100.0})
 
         # Trigger on 5th consecutive up day
         if streak == 5 and streak_start_price:
             gain_pct = (current_price - streak_start_price) / streak_start_price * 100.0
             last_action = sym_state.get("last_action_date")
             if last_action != today.isoformat():  # avoid double-fire same day
-                if gain_pct > 15:
-                    res = _sell(sym, frac=1.0)
-                    actions.append({"symbol": sym, "action": "sell_all", "gain_pct": gain_pct, "result": res})
-                    sym_state["last_action_date"] = today.isoformat()
-                elif gain_pct > 5:
-                    res = _sell(sym, frac=0.5)
-                    actions.append({"symbol": sym, "action": "sell_half", "gain_pct": gain_pct, "result": res})
-                    sym_state["last_action_date"] = today.isoformat()
+                verdict = decide(streak, gain_pct, is_core)
+                frac = {"sell_all": 1.0, "sell_half": 0.5}.get(verdict)
+                if frac is not None:
+                    res = {"dry_run": True} if dry_run else _sell(sym, frac=frac)
+                    actions.append({"symbol": sym, "action": verdict, "gain_pct": gain_pct, "result": res})
+                    if not dry_run:
+                        sym_state["last_action_date"] = today.isoformat()
                 else:
-                    actions.append({"symbol": sym, "action": "hold", "gain_pct": gain_pct, "streak": streak})
+                    actions.append({"symbol": sym, "action": verdict, "gain_pct": gain_pct, "streak": streak})
 
         # Reset streak tracking on down/flat day
         if streak == 0:
             sym_state["streak_start_price"] = None
             sym_state["warned_day4"] = False
 
-    _save_state(state)
+    if not dry_run:                      # a dry run must leave no trace
+        _save_state(state)
     return {"date": today.isoformat(), "actions": actions, "state": state}
 
 
 if __name__ == "__main__":
     import sys
-    out = run_check()
+    out = run_check(dry_run="--dry-run" in sys.argv)   # --dry-run: report, never sell
     print(json.dumps(out, indent=2, default=str))
-    if out.get("actions"):
-        sys.exit(0)
     sys.exit(0)

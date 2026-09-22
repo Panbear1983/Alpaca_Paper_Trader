@@ -153,7 +153,7 @@ def fetch_politician_trades(pol_id, per_page=96):
 # Why it exists: on 2026-08-17 the wallet bought seven names at $43,120 each on
 # a $91k account — 47% of equity per position — and lost 18.5% the next session.
 # Nothing in the system said no.
-HARD_MAX_POSITION_PCT = 1.0      # code ceiling; config may lower this, never raise it
+HARD_MAX_POSITION_PCT = 1.0      # default ceiling for wallets NOT listed in HARD_LIMITS
 
 # Total long exposure, not just per name. The per-name cap alone leaves the door
 # open: intraday_momentum sizes at equity * gross_mult / top_n, so 20 names at
@@ -161,7 +161,36 @@ HARD_MAX_POSITION_PCT = 1.0      # code ceiling; config may lower this, never ra
 # adverse move on that is about -28% — worse than 2026-08-18, just spread wider.
 # 2.0 rather than 0.9 because intraday is designed around intraday buying power
 # and flattening before the close; 1x would break its premise outright.
-HARD_MAX_GROSS_EXPOSURE = 2.0
+HARD_MAX_GROSS_EXPOSURE = 2.0    # default ceiling for wallets NOT listed in HARD_LIMITS
+
+# Per-wallet code ceilings (2026-09-22). These are the un-arguable limits: the
+# dashboard and the strategy file may set a wallet LOWER than its row here,
+# never higher, and nothing an agent can write to disk changes them. Keyed by
+# wallet so the two benchmark wallets (Low Risk, Photonic) keep their old
+# limits byte for byte — Peter measures High Risk against them.
+#
+# High Risk: 25% per name, no borrowing. The August loss was 3.5x leverage
+# into seven names at once; a 25%/1.0x box makes that arithmetic impossible.
+HARD_LIMITS = {
+    "High Risk": {"position_pct": 0.25, "gross": 1.0},
+}
+_DEFAULT_HARD = {"position_pct": HARD_MAX_POSITION_PCT, "gross": HARD_MAX_GROSS_EXPOSURE}
+
+
+def _hard():
+    """The ceiling row for the ACTIVE wallet, resolved at call time so
+    wallets.apply() redirects it exactly as it redirects credentials."""
+    try:
+        import wallets
+        return HARD_LIMITS.get(wallets.current(), _DEFAULT_HARD)
+    except Exception:
+        return _DEFAULT_HARD
+
+
+def hard_limits_for(wallet: str) -> dict | None:
+    """The code ceilings for `wallet`, or None when it has no row (the TUI
+    shows the header line only for wallets that are actually boxed)."""
+    return HARD_LIMITS.get(wallet)
 _CAP_CACHE = {"t": 0.0, "equity": None, "positions": None}
 _CAP_CACHE_TTL = 30               # seconds; keeps the cap off the rate limiter
 
@@ -171,15 +200,15 @@ class OrderRejected(Exception):
 
 
 def _max_position_pct():
-    """Configured cap, clamped to the code ceiling."""
+    """Configured cap, clamped to the active wallet's code ceiling."""
+    ceiling = _hard()["position_pct"]
     try:
-        v = float((load_config().get("risk") or {}).get(
-            "max_position_pct", HARD_MAX_POSITION_PCT))
+        v = float((load_config().get("risk") or {}).get("max_position_pct", ceiling))
     except Exception:
-        v = HARD_MAX_POSITION_PCT
+        v = ceiling
     if v != v or v <= 0:                      # NaN or nonsense
-        return HARD_MAX_POSITION_PCT
-    return min(v, HARD_MAX_POSITION_PCT)
+        return ceiling
+    return min(v, ceiling)
 
 
 def _cap_snapshot():
@@ -234,14 +263,15 @@ def _max_gross_exposure():
     This blocks new buys only. Nothing here forces a sale, so a regime flip
     never liquidates an existing book.
     """
+    ceiling = _hard()["gross"]
     try:
         risk = load_config().get("risk") or {}
-        v = float(risk.get("max_gross_exposure", HARD_MAX_GROSS_EXPOSURE))
+        v = float(risk.get("max_gross_exposure", ceiling))
     except Exception:
-        risk, v = {}, HARD_MAX_GROSS_EXPOSURE
+        risk, v = {}, ceiling
     if v != v or v <= 0:
-        v = HARD_MAX_GROSS_EXPOSURE
-    base = min(v, HARD_MAX_GROSS_EXPOSURE)
+        v = ceiling
+    base = min(v, ceiling)
 
     regime = current_regime()
     if regime == "unknown":
@@ -253,7 +283,7 @@ def _max_gross_exposure():
         r = base
     if r != r or r <= 0:
         r = base
-    return min(base, r, HARD_MAX_GROSS_EXPOSURE)
+    return min(base, r, ceiling)
 
 
 def check_gross_cap(ticker, side, notional=None, qty=None):
@@ -502,6 +532,20 @@ def _anchor_names():
         return set()
 
 
+def core_holds():
+    """Symbols Peter marked CORE in the dashboard (anchor.core_holds).
+
+    The five-up-days rule and the take-profit tiers leave these alone so they
+    can compound. Caps and the trailing stop still apply — protection is never
+    optional, trimming is. Read per call: the file may change under a running
+    watcher, and load_config() is mtime-cached anyway.
+    """
+    try:
+        return {str(x).upper() for x in (load_config().get("anchor") or {}).get("core_holds") or []}
+    except Exception:
+        return set()
+
+
 def _trim_to_caps(positions, equity, dry_run, acts):
     """Sell down over-cap holdings. Returns the number of sell orders sent.
 
@@ -710,9 +754,10 @@ def manage_open_positions(cfg, dry_run=False):
             actions += 1
             continue
 
-        # 3. Take-profit (one tier per run)
+        # 3. Take-profit (one tier per run). CORE holds are exempt — Peter
+        #    marks them to be left to compound (2026-09-22); stops still apply.
         sold_tp = False
-        for idx, level in enumerate(tp_levels):
+        for idx, level in enumerate([] if sym in core_holds() else tp_levels):
             thr, frac = level[0], level[1]
             if st["tp_stage"] <= idx and plpc >= thr:
                 sell_qty = round(qty * frac, 4)

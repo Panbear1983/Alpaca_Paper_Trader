@@ -1533,6 +1533,7 @@ class AlpacaTUI(App):
         Binding("e", "rebalance", "Rebalance top-N"),
         Binding("x", "cancel_order", "Cancel order"),
         Binding("X", "cancel_all_orders", "Cancel all"),
+        Binding("C", "toggle_core", "Core hold"),
         Binding("/", "focus_search", "Bio search"),
         Binding("q", "quit", "Quit"),
     ]
@@ -2194,6 +2195,44 @@ class AlpacaTUI(App):
             self._log(t("log.refreshed", n=len(positions), orders=ord_tag,
                         time=f"{dt.datetime.now():%H:%M:%S}"))
 
+    # ── core holds (key C) ────────────────────────────────────────────────────
+    def _core_holds(self) -> list[str]:
+        """Names flagged CORE for the active wallet (anchor.core_holds)."""
+        try:
+            a = strategies.load_strategy(wl.current()).get("anchor") or {}
+            return [str(s).upper() for s in (a.get("core_holds") or [])]
+        except Exception:
+            return []
+
+    def action_toggle_core(self) -> None:
+        """Mark / unmark the highlighted holding as a CORE hold.
+
+        Core = the five-up-days rule and the take-profit tiers leave it alone
+        so it can compound. Caps and the trailing stop still apply. Written to
+        the wallet's strategy file, so every process sees it on its next read.
+        """
+        sym = self._sel_sym
+        if self._view_mode != "positions" or not sym:
+            self._log(t("log.core_nosel"))
+            return
+        turning_on = sym not in set(self._core_holds())
+
+        def mut(c):
+            a = c.setdefault("anchor", {})
+            keep = [s for s in (a.get("core_holds") or []) if str(s).upper() != sym]
+            if turning_on:
+                keep.append(sym)
+            a["core_holds"] = keep
+            return c
+
+        try:
+            strategies.update_strategy(mut, wl.current())
+        except Exception as e:
+            self._log(f"[red]core flag not saved: {e}[/]")
+            return
+        self._log(t("log.core_on" if turning_on else "log.core_off", sym=sym))
+        self._repopulate_table()
+
     # ── table population (positions or orders) ────────────────────────────────
     def _repopulate_table(self) -> None:
         """Re-fill the holdings DataTable from cached data (no column reset)."""
@@ -2202,6 +2241,7 @@ class AlpacaTUI(App):
         if self._view_mode == "positions":
             self._syms = []
             self._mv = {}
+            core = set(self._core_holds())
             for p in sorted(self._positions_cache,
                             key=lambda x: _f(x.get("unrealized_pl")), reverse=True):
                 sym  = p.get("symbol", "?")
@@ -2217,7 +2257,8 @@ class AlpacaTUI(App):
                 col  = "green" if pl >= 0 else "red"
                 day_col = "green" if day_pl >= 0 else "red"
                 t.add_row(
-                    sym, f"{qty:g}", f"{avg:.2f}", f"{cur:.2f}",
+                    (f"{sym} ★" if sym in core else sym),   # ★ = core hold (key C)
+                    f"{qty:g}", f"{avg:.2f}", f"{cur:.2f}",
                     f"{mv:,.0f}", f"{cost:,.0f}",
                     Text(f"{pl:+,.0f}", style=col), Text(f"{plpc:+.1f}%", style=col),
                     Text(f"{day_pl:+,.0f}", style=day_col),

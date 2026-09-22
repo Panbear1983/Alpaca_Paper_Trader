@@ -44,7 +44,7 @@ class Field:
     section: str
     path: str            # dotted path into strategy_config.json
     label: str
-    ftype: str           # int | float | bool | time | csv_sectors | csv_tickers
+    ftype: str           # int | float | bool | time | csv_sectors | csv_tickers | csv_tickers_opt
     lo: float | None = None
     hi: float | None = None
     danger: str = DANGER_NONE
@@ -77,12 +77,14 @@ FIELDS: list[Field] = [
     Field("RISK", "risk.max_position_pct", "Per-name cap (frac of equity)", "float",
           0.05, 0.25, danger="exposure",
           desc="Hard concentration limit enforced in place_market_order() for EVERY "
-               "engine. Code clamps this to 0.25 — raising it here has no effect."),
+               "engine AND manual buys. Wallets with a code ceiling (High Risk: 25%) "
+               "cannot be raised above it here — the ceiling wins."),
     Field("RISK", "risk.max_gross_exposure", "Max gross exposure (x equity)", "float",
           0.50, 2.00, danger="exposure",
           desc="Total long market value across the whole book, all engines. Code "
-               "clamps this to 2.00. Stops many mid-sized positions adding up to "
-               "the leverage that a per-name cap alone cannot see."),
+               "ceiling 2.00, or 1.00 (no borrowing) for High Risk. Stops many "
+               "mid-sized positions adding up to the leverage that a per-name cap "
+               "alone cannot see."),
     Field("RISK", "risk.gross_by_regime.bear", "Gross cap in a BEAR market", "float",
           0.00, 2.00, danger="exposure",
           desc="Leverage allowed when SPY is below its 200-day average. Deleverages "
@@ -129,6 +131,13 @@ FIELDS: list[Field] = [
           desc="While the fence is ON only these names may be bought — by every engine "
                "AND by manual buys from this dashboard. Fence OFF = unrestricted. "
                "Comma or space separated. An empty list is refused: it would block every buy."),
+    # Core holds (2026-09-22): positions Peter wants left to compound. The
+    # five-up-days rule and the take-profit tiers skip them; caps and the
+    # trailing stop do NOT — protection is never optional, trimming is.
+    Field("ANCHOR", "anchor.core_holds", "Core holds (kept whole)", "csv_tickers_opt",
+          desc="Names the five-up-days rule and the take-profit tiers must leave alone. "
+               "Toggle from the holdings table with C. Caps and the trailing stop still "
+               "apply. Blank = none."),
     Field("ANCHOR", "anchor.max_entries_per_name_per_day", "Entries per name per day", "int", 1, 5,
           desc="Filled buys allowed per anchor name per session. Counted from Alpaca fills."),
     Field("ANCHOR", "anchor.max_entries_per_day", "Entries per day, all names (0=off)", "int", 0, 20,
@@ -249,6 +258,12 @@ def fmt_value(field: Field, value, cfg: dict | None = None,
     a 96-column table row, so the row shows a count plus the first few while
     the edit dialog (cfg=None, compact=False) shows the full editable list.
     """
+    if field.ftype == "csv_tickers_opt":
+        names = ([str(v).upper() for v in value] if isinstance(value, list)
+                 else ([str(value).upper()] if value else []))
+        if not names:
+            return "none" if cfg is not None else ""   # table says none; edit box is blank
+        return " ".join(names) if compact else ", ".join(names)
     if field.ftype == "csv_tickers":
         names = ([str(v).upper() for v in value] if isinstance(value, list)
                  else ([str(value).upper()] if value else []))
@@ -283,6 +298,8 @@ def fmt_range(field: Field) -> str:
         return "csv"
     if field.ftype == "csv_tickers":
         return "tickers"
+    if field.ftype == "csv_tickers_opt":
+        return "tickers or blank"
     if field.lo is not None and field.hi is not None:
         return f"{field.lo:g}–{field.hi:g}"
     return ""
@@ -314,9 +331,11 @@ def validate(field: Field, raw: str) -> tuple[bool, object]:
             return False, f"unknown sector(s): {', '.join(bad)} — known: {', '.join(KNOWN_SECTORS)}"
         return True, parts
 
-    if field.ftype == "csv_tickers":
+    if field.ftype in ("csv_tickers", "csv_tickers_opt"):
         parts = [p.strip().upper() for p in re.split(r"[,\s;]+", raw) if p.strip()]
         if not parts:
+            if field.ftype == "csv_tickers_opt":
+                return True, []
             return False, ("enter at least one ticker — to lift all restrictions, turn "
                            "the Anchor fence OFF instead (the row then reads "
                            f"'{UNRESTRICTED}')")

@@ -36,7 +36,7 @@ _TABLE: dict[str, tuple[str, str]] = {
         "   •   "
         "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
         "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance   "
-        "[b]x[/b] cancel order   [b]X[/b] cancel all orders"
+        "[b]x[/b] cancel order   [b]X[/b] cancel all orders   [b]C[/b] core hold"
         "   •   [b]/[/b] bio search",
         "[b]r[/b] 更新   [b]d[/b] 模擬排名   [b]p[/b] 推送報告   [b]o[/b] 投組圖   "
         "[b]w[/b] 時間範圍   [b]v[/b] 持倉/掛單   "
@@ -45,7 +45,7 @@ _TABLE: dict[str, tuple[str, str]] = {
         "   •   "
         "[b]f[/b] 全部平倉   [b]t[/b] 盤中執行   [b]c[/b] 國會跟單   "
         "[b]b[/b] 買入   [b]s[/b] 賣出   [b]e[/b] 再平衡   "
-        "[b]x[/b] 取消掛單   [b]X[/b] 取消全部掛單"
+        "[b]x[/b] 取消掛單   [b]X[/b] 取消全部掛單   [b]C[/b] 核心持股"
         "   •   [b]/[/b] 公司簡介搜尋",
     ),
 
@@ -234,6 +234,13 @@ _TABLE: dict[str, tuple[str, str]] = {
                          "[red]設定儲存錯誤 {path}：{e}[/]"),
     "log.cfg_changed": ("[cyan]cfg {path}: {old} → {new} (live ≤1 tick)[/]",
                         "[cyan]設定 {path}：{old} → {new}（≤1 週期生效）[/]"),
+    "log.core_on": ("[yellow]★ {sym} marked CORE — the five-up-days rule and the profit "
+                    "tiers will leave it alone (caps and the trailing stop still apply)[/]",
+                    "[yellow]★ {sym} 已設為核心持股 — 連五漲規則與分批停利將不動它（上限與移動停損仍適用）[/]"),
+    "log.core_off": ("[yellow]{sym} is no longer a core hold — normal rules apply again[/]",
+                     "[yellow]{sym} 已取消核心持股 — 恢復一般規則[/]"),
+    "log.core_nosel": ("[dim]select a holding in the positions view first (C marks it core)[/]",
+                       "[dim]請先在持倉檢視中選取一檔（按 C 設為核心持股）[/]"),
 
     # ── manual modal ──────────────────────────────────────────────────────────
     "man.hint": (
@@ -523,6 +530,10 @@ _FIELD_ZH: dict[str, tuple[str, str]] = {
         "允許買入的股票（白名單）",
         "圍欄開啟時只能買入這些代號 — 包含本儀表板的手動買入。圍欄關閉 = 不限制。"
         "以逗號或空格分隔；空清單會被拒絕（會擋下所有買入）。"),
+    "anchor.core_holds": (
+        "核心持股（不動）",
+        "連五漲規則與分批停利不會賣出這些代號。在持倉表按 C 切換。"
+        "部位上限與移動停損仍然適用。留白 = 無。"),
     "swing.enabled": (
         "波段買入 開/關",
         "每日 RS 動能買入＋逢低加碼。排程器於下一週期套用。"),
