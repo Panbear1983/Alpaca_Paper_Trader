@@ -203,6 +203,12 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[dim]Enter=編輯 · r=重新載入 · Esc=關閉 — 變更於下一個排程週期生效"
         "（≤20 分鐘）[/]"),
     "cfg.unrestricted": ("unrestricted", "不限制"),
+    "cfg.hard": (
+        "[b]Hard limits in code (not editable here):[/] per-name {pos}% · "
+        "borrowing none ({gross}x gross) · broker-side stops {stops}",
+        "[b]程式碼硬上限（此處不可編輯）：[/] 單一持股 {pos}% · "
+        "不可融資（總曝險 {gross} 倍）· 券商端停損 {stops}"),
+    "cfg.refused": ("[red]refused: {why}[/]", "[red]已拒絕：{why}[/]"),
     "cfg.err_empty_list": (
         "[red]Cannot turn the fence ON with an empty allow list — every buy would be "
         "blocked. Add names to 'Allowed stocks' first.[/]",
@@ -578,6 +584,15 @@ _FIELD_ZH: dict[str, tuple[str, str]] = {
     "dynamic_exits.stop_loss_pct": (
         "停損（比例）",
         "未實現虧損達此值即全部賣出（0.08 = -8%）。"),
+    "dynamic_exits.stop_atr_mult": (
+        "券商停損寬度：ATR 倍數",
+        "每檔掛在券商的移動停損寬度 = 此倍數 × 其 14 日平均日振幅，並限制在下方的下限與上限之間。僅限有硬上限的錢包。"),
+    "dynamic_exits.stop_min_pct": (
+        "券商停損寬度：下限（比例）",
+        "允許的最窄停損（0.06 = 低於高點 6%）。"),
+    "dynamic_exits.stop_max_pct": (
+        "券商停損寬度：上限（比例）",
+        "允許的最寬停損；無法取得 K 線時亦採用此寬度。"),
     "dynamic_exits.trail_trigger_pct": (
         "移動停利觸發（比例）",
         "峰值獲利達此值後啟動移動停利。"),

@@ -774,11 +774,19 @@ class StrategyConfigModal(ModalScreen[None]):
         # Per-wallet stamps (flat dict = pre-split legacy → treat as this wallet's)
         st = st.get(strategies.slug(wl.current()), st if "last_manage_at" in st else {})
         man = (st.get("last_manage_at") or "never")[:16].replace("T", " ")
-        return i18n.t("cfg.head", wallet=wl.current(),
+        head = i18n.t("cfg.head", wallet=wl.current(),
                       file=os.path.basename(strategies.path_for(wl.current())),
                       man=man,
                       swing=st.get("last_swing_date", "never"),
                       copy=st.get("last_copy_date", "never"))
+        # Boxed wallets (High Risk) get one more line: the ceilings that live
+        # in code and cannot be raised from this screen.
+        try:
+            import broker_stops as bs
+            hard = cf.hard_limits_text(cc.hard_limits_for(wl.current()), bs.enabled(wl.current()), i18n.t)
+        except Exception:
+            hard = None
+        return head + ("\n" + hard if hard else "")
 
     def _populate(self) -> None:
         cfg = strategies.load_strategy(wl.current())
@@ -833,7 +841,9 @@ class StrategyConfigModal(ModalScreen[None]):
         blocked = cf.enable_blocked_reason(strategies.load_strategy(wl.current()),
                                            field, new_val)
         if blocked:
-            self.query_one("#cfg_hint", Label).update(i18n.t("cfg.err_empty_list"))
+            self.query_one("#cfg_hint", Label).update(
+                i18n.t("cfg.err_empty_list") if field.path == "anchor.enabled"
+                else i18n.t("cfg.refused", why=blocked))
             self.app._log(f"[red]cfg {field.path}: refused — {blocked}[/]")
             return
         prompt = self._danger_prompt(field, new_val)

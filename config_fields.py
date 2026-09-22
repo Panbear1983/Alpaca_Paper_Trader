@@ -156,6 +156,13 @@ FIELDS: list[Field] = [
     # ── EXIT ENGINE ──────────────────────────────────────────────────────────
     Field("EXITS", "dynamic_exits.stop_loss_pct", "Stop-loss (frac)", "float", 0.02, 0.25,
           desc="Sell all when unrealized loss reaches this (0.08 = -8%)."),
+    Field("EXITS", "dynamic_exits.stop_atr_mult", "Broker stop width: ATR multiple", "float", 1.0, 5.0,
+          desc="Resting stop width per name = this x its 14-day average daily range, "
+               "kept between the floor and ceiling below. Boxed wallets only."),
+    Field("EXITS", "dynamic_exits.stop_min_pct", "Broker stop width: floor (frac)", "float", 0.02, 0.20,
+          desc="Narrowest resting stop allowed (0.06 = 6% below the high-water mark)."),
+    Field("EXITS", "dynamic_exits.stop_max_pct", "Broker stop width: ceiling (frac)", "float", 0.05, 0.30,
+          desc="Widest resting stop allowed; also the width used when no bars are available."),
     Field("EXITS", "dynamic_exits.trail_trigger_pct", "Trail trigger (frac)", "float", 0.01, 1.0,
           desc="Trailing stop activates once peak gain reaches this."),
     Field("EXITS", "dynamic_exits.trail_giveback_pct", "Trail giveback (frac)", "float", 0.01, 1.0,
@@ -403,4 +410,29 @@ def enable_blocked_reason(cfg: dict, field: Field, new_val) -> str | None:
         if not (get_path(cfg, "anchor.universe") or []):
             return ("cannot turn the fence ON with an empty allow list — every buy "
                     "would be blocked; add names to 'Allowed stocks' first")
+    # The stop-width floor and ceiling must stay in order, or every width
+    # collapses to one number and the ATR sizing means nothing.
+    if field.path == "dynamic_exits.stop_min_pct":
+        hi = get_path(cfg, "dynamic_exits.stop_max_pct")
+        if hi is not None and float(new_val) > float(hi):
+            return f"floor {float(new_val):g} is above the ceiling {float(hi):g} — raise the ceiling first"
+    if field.path == "dynamic_exits.stop_max_pct":
+        lo = get_path(cfg, "dynamic_exits.stop_min_pct")
+        if lo is not None and float(new_val) < float(lo):
+            return f"ceiling {float(new_val):g} is below the floor {float(lo):g} — lower the floor first"
     return None
+
+
+def hard_limits_text(limits: dict | None, stops_on: bool, t=None) -> str | None:
+    """The strategy screen's header line for a boxed wallet, or None for an
+    open one. `limits` is capitol_copier.hard_limits_for(wallet); `t` is the
+    translator (i18n.t) — injected so this stays testable without the TUI."""
+    if not limits:
+        return None
+    if t is None:
+        import i18n
+        t = i18n.t
+    return t("cfg.hard",
+             pos=f"{float(limits.get('position_pct', 1.0)) * 100:.0f}",
+             gross=f"{float(limits.get('gross', 2.0)):.1f}",
+             stops=t("state.on") if stops_on else t("state.off"))

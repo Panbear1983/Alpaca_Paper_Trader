@@ -53,12 +53,22 @@ MAX_LESSONS = 10
 # WB or when — and the weekly sign-off would be ceremonial.
 WB_HOME = Path.home() / ".hermes/profiles/wanna_buffet"
 WATCHED = {
-    "soul":    WB_HOME / "SOUL.md",
-    "memory":  WB_HOME / "memories/MEMORY.md",
-    "lessons": LESSONS,
-    "note":    NOTE,
+    "soul":     WB_HOME / "SOUL.md",
+    "memory":   WB_HOME / "memories/MEMORY.md",
+    "lessons":  LESSONS,
+    "note":     NOTE,
+    "strategy": _HERE / "strategy_high_risk.json",     # the fence + caps (WB rewrote it on 2026-09-21)
+    "wb_cron":  WB_HOME / "cron/jobs.json",           # WB's own schedule
 }
+# Files only Claude should write. A change here with no instruction logged
+# since the last check is reported in the evening text (step 9, 2026-09-22).
+DRIFT_WATCH = ("soul", "strategy", "wb_cron")
+WATCH_SNAP = DIARY / ".watched"                      # digests + JSON snapshots
 CHECK_LOG = DIARY / "check_log.jsonl"
+
+# Step 9 reconciliation (High Risk only — the wallet with a HARD_LIMITS row).
+GUARD_WIDTH_TOL_PT = 1.0     # resting stop may drift this far from today's width
+HB_CLOSE_GRACE_S   = 180     # heartbeat may be this much older than the bell
 
 CLAUDE_BIN = os.path.expanduser("~/.local/bin/claude")
 CLAUDE_TIMEOUT = int(os.environ.get("OVERSIGHT_CLAUDE_TIMEOUT", "300"))
@@ -194,6 +204,196 @@ def history(limit: int = 10) -> list[dict]:
     return _jsonl(DIARY / "history.jsonl")[-limit:]
 
 
+# ── step 9: does the broker's book match the box? (pure) ─────────────────────
+
+def _fl(x, default=0.0) -> float:
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return default
+
+
+def guard_breaches(positions: list[dict], guards: dict, widths: dict, ceiling: dict | None,
+                   engine_caps: dict, equity: float, guards_on: bool,
+                   hb_epoch: float | None, close_epoch: float | None, now_epoch: float) -> list[str]:
+    """Silent unless something is wrong. No network — everything is passed in.
+
+    positions   Alpaca positions (symbol, qty, market_value)
+    guards      {SYM: [resting trailing-stop orders]} from broker_stops.guard_orders()
+    widths      {SYM: today's width in percent points} from broker_stops.width_pct()
+    ceiling     capitol_copier.hard_limits_for(wallet) — None means not a boxed wallet
+    engine_caps what _trim_to_caps actually enforces (the wallet's config; 1.0 today
+                until step 8 is applied, so an over-ceiling legacy holding is Peter's
+                choice, not a breach — only a cap the engine failed to enforce is)
+    """
+    import math
+    if not ceiling:
+        return []
+    out: list[str] = []
+    held = {str(p.get("symbol", "")).upper(): p for p in positions if _fl(p.get("qty")) > 0}
+
+    if not guards_on:
+        out.append("Broker-side stops are switched OFF in the High Risk settings — "
+                   "only the software stop on the Mac is guarding the book.")
+    else:
+        for sym, p in sorted(held.items()):
+            whole = int(math.floor(_fl(p.get("qty"))))
+            gs = guards.get(sym) or []
+            if whole < 1:
+                if gs:
+                    out.append(f"{sym}: a resting stop on a position under one share (should be none).")
+                continue
+            if not gs:
+                out.append(f"{sym}: {whole} whole shares with no resting stop at the broker "
+                           f"(software stop only).")
+                continue
+            if len(gs) > 1:
+                out.append(f"{sym}: {len(gs)} resting stops (expected 1).")
+            g = max(gs, key=lambda o: _fl(o.get("hwm")))
+            gq = int(_fl(g.get("qty")))
+            if gq != whole:
+                out.append(f"{sym}: the resting stop covers {gq} of {whole} whole shares.")
+            w = widths.get(sym)
+            if w is not None and abs(_fl(g.get("trail_percent")) - float(w)) > GUARD_WIDTH_TOL_PT:
+                out.append(f"{sym}: resting stop trails {_fl(g.get('trail_percent')):.1f}%, "
+                           f"today's width is {float(w):.1f}%.")
+        for sym in sorted(set(guards) - set(held)):
+            if guards.get(sym):
+                out.append(f"{sym}: a resting stop with no position behind it.")
+
+    if equity and equity > 0:
+        name_cap = _fl(engine_caps.get("position_pct"), 1.0)
+        for sym, p in sorted(held.items()):
+            mv = abs(_fl(p.get("market_value")))
+            if mv > equity * name_cap * 1.005:
+                out.append(f"{sym} is {mv / equity * 100:.0f}% of equity, over the {name_cap * 100:.0f}% "
+                           f"cap the exit engine should have trimmed it to.")
+        gross = sum(abs(_fl(p.get("market_value"))) for p in held.values())
+        if gross > equity * _fl(ceiling.get("gross"), 1.0) * 1.005:
+            out.append(f"Book is {gross / equity:.2f}x equity — borrowing, which the box forbids.")
+
+    if close_epoch and now_epoch > close_epoch:
+        if hb_epoch is None:
+            out.append("No price-watcher heartbeat found — it may not have completed a single sweep today.")
+        elif hb_epoch < close_epoch - HB_CLOSE_GRACE_S:
+            when = dt.datetime.fromtimestamp(hb_epoch, ET).strftime("%H:%M ET")
+            out.append(f"Price watcher's last heartbeat was {when}, before the close — "
+                       f"it was not sweeping at the bell.")
+    return out
+
+
+def _close_epoch(sess: str) -> float | None:
+    """Epoch of the bell on `sess` (early closes honoured); 16:00 ET if unknown."""
+    close = "16:00"
+    try:
+        import requests
+        import capitol_copier as cc
+        r = requests.get(f"{cc.BASE_URL}/calendar", headers=cc.ALPACA_HEADERS, timeout=10,
+                         params={"start": sess, "end": sess})
+        for c in r.json() or []:
+            if c.get("date") == sess and c.get("close"):
+                close = c["close"]
+    except Exception:
+        pass
+    try:
+        h, m = (int(x) for x in close.split(":"))
+        return dt.datetime.combine(dt.date.fromisoformat(sess), dt.time(h, m), tzinfo=ET).timestamp()
+    except Exception:
+        return None
+
+
+def guard_facts(sess: str) -> list[str]:
+    """Live gather for guard_breaches — High Risk (the default wallet) only."""
+    import wallets
+    import capitol_copier as cc
+    import strategies
+    ceiling = cc.hard_limits_for(wallets.current())
+    if ceiling is None:
+        return []
+    import broker_stops as bs
+    positions = [p for p in cc.get_positions() if _fl(p.get("qty")) > 0]
+    guards = bs.guard_orders()
+    widths = {str(p["symbol"]).upper(): bs.width_pct(p["symbol"]) for p in positions}
+    engine_caps = {"position_pct": cc._max_position_pct(ceiling=cc._DEFAULT_HARD["position_pct"]),
+                   "gross": cc._max_gross_exposure(ceiling=cc._DEFAULT_HARD["gross"])}
+    equity = _fl(cc.get_account_equity())
+    guards_on = bool((strategies.load_merged().get("anchor") or {}).get("broker_stops"))
+    try:
+        with open(DIARY / "watcher_heartbeat.json") as f:
+            hb_epoch = _fl(json.load(f).get("epoch")) or None
+    except Exception:
+        hb_epoch = None
+    return guard_breaches(positions, guards, widths, ceiling, engine_caps, equity, guards_on,
+                          hb_epoch, _close_epoch(sess), dt.datetime.now(ET).timestamp())
+
+
+# ── step 9: did anyone rewrite what only Claude should write? ────────────────
+
+def _json_changed_keys(old, new, prefix: str = "", depth: int = 2) -> list[str]:
+    """Dotted keys that differ between two JSON values, two levels deep."""
+    if not (isinstance(old, dict) and isinstance(new, dict)) or depth == 0:
+        return [prefix.rstrip(".")] if old != new else []
+    out: list[str] = []
+    for k in sorted(set(old) | set(new)):
+        if k not in old or k not in new:
+            out.append(f"{prefix}{k}")
+        else:
+            out.extend(_json_changed_keys(old[k], new[k], f"{prefix}{k}.", depth - 1))
+    return out
+
+
+def drift_lines(prev: dict, cur: dict, logged: set) -> list[str]:
+    """prev/cur: {which: {"digest", "ts", "name", "keys"?}}; logged: whichs with an
+    instruction logged since prev. Pure."""
+    out = []
+    for which, c in cur.items():
+        p = prev.get(which)
+        if not p or p.get("digest") == c.get("digest") or which in logged:
+            continue
+        keys = c.get("keys") or []
+        what = (", ".join(keys[:8]) + (" …" if len(keys) > 8 else "")) if keys else "content changed"
+        out.append(f"{c.get('name', which)} was rewritten since the {str(p.get('ts', ''))[:16]} check "
+                   f"with no instruction logged ({what}). WB, or a hand edit?")
+    return out
+
+
+def watched_drift(now: dt.datetime | None = None) -> list[str]:
+    """Compare the DRIFT_WATCH files with their state at the last check."""
+    now = now or dt.datetime.now(ET)
+    WATCH_SNAP.mkdir(parents=True, exist_ok=True)
+    state_file = WATCH_SNAP / "state.json"
+    try:
+        prev = json.loads(state_file.read_text())
+    except Exception:
+        prev = {}
+    cur, logged = {}, set()
+    for which in DRIFT_WATCH:
+        path = WATCHED[which]
+        entry = {"digest": _digest(path), "ts": now.isoformat(timespec="seconds"), "name": path.name}
+        snap = WATCH_SNAP / f"{which}.snap"
+        if which in prev and prev[which].get("digest") != entry["digest"] and path.suffix == ".json":
+            try:
+                entry["keys"] = _json_changed_keys(json.loads(snap.read_text()), json.loads(path.read_text()))
+            except Exception:
+                pass
+        if which in prev:
+            since = str(prev[which].get("ts", ""))
+            if any(r.get("file") == which and str(r.get("ts", "")) >= since for r in _jsonl(INSTRUCTION_LOG)):
+                logged.add(which)
+        cur[which] = entry
+    lines = drift_lines(prev, cur, logged)
+    for which in DRIFT_WATCH:                       # refresh the snapshots + digests
+        try:
+            (WATCH_SNAP / f"{which}.snap").write_bytes(WATCHED[which].read_bytes())
+        except Exception:
+            pass
+    try:
+        state_file.write_text(json.dumps(cur, indent=1))
+    except Exception:
+        pass
+    return lines
+
+
 # ── stage 1: the silent close-of-day check ───────────────────────────────────
 
 def run_check(push: bool = True) -> list[str]:
@@ -230,6 +430,17 @@ def run_check(push: bool = True) -> list[str]:
         breaches.extend(ab)
     except Exception as e:
         breaches.append(f"anchor check could not run: {e}")
+
+    # Step 9 (2026-09-22): the broker's resting stops, caps and the watcher's
+    # heartbeat against the box, and rewrites of files only Claude should touch.
+    try:
+        breaches.extend(guard_facts(sess))
+    except Exception as e:
+        breaches.append(f"guard check could not run: {e}")
+    try:
+        breaches.extend(watched_drift())
+    except Exception as e:
+        breaches.append(f"watched-file check could not run: {e}")
 
     # Earnings ahead for a held name (2026-09-22). Not a breach of anything,
     # but the one risk no stop can catch — worth the evening text.

@@ -165,9 +165,10 @@ def width_pct(sym: str, cfg: dict | None = None) -> float:
     sym = sym.upper()
     cfg = cfg or _cfg()
     st = _load_state()
-    if st.get("session") != _session():
-        st = {"session": _session(), "widths": {}, "guards": st.get("guards", {}),
-              "last_mutation": st.get("last_mutation", {})}
+    if st.get("session") != _session() or st.get("widths_cfg") != cfg:
+        # new session, or the width settings were edited in the strategy tab
+        st = {"session": _session(), "widths": {}, "widths_cfg": dict(cfg),
+              "guards": st.get("guards", {}), "last_mutation": st.get("last_mutation", {})}
     w = st.setdefault("widths", {}).get(sym)
     if w:
         return float(w)

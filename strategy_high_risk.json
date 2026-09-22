@@ -60,7 +60,10 @@
     "pyramid_levels": [],
     "pyramid_add_frac": 0.6,
     "prune_off_target": false,
-    "max_holdings": 20
+    "max_holdings": 20,
+    "stop_atr_mult": 2.5,
+    "stop_min_pct": 0.06,
+    "stop_max_pct": 0.14
   },
   "intraday": {
     "enabled": false,
