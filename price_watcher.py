@@ -85,6 +85,29 @@ def get_current_price(symbol):
     except Exception:
         return 0.0
 
+# ── Heartbeat (read by event_watcher.check_heartbeats) ────────────────────────
+
+HEARTBEAT_FILE = '/Users/peter/GitHub/Alpaca_Paper_Trader/diary/watcher_heartbeat.json'
+
+
+def _write_heartbeat(n_positions: int, n_priced: int) -> None:
+    """Atomic; never raises. Only called after a full, successful sweep."""
+    try:
+        import tempfile
+        from zoneinfo import ZoneInfo
+        os.makedirs(os.path.dirname(HEARTBEAT_FILE), exist_ok=True)
+        payload = {"epoch": time.time(),
+                   "ts": datetime.now(ZoneInfo("America/New_York")).isoformat(timespec="seconds"),
+                   "n_positions": int(n_positions), "n_priced": int(n_priced),
+                   "pid": os.getpid()}
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(HEARTBEAT_FILE), prefix=".hb.", suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp, HEARTBEAT_FILE)
+    except Exception as e:
+        print(f"[watcher] heartbeat not written: {e}")
+
+
 # ── Broker-side guards (broker_stops.py) ──────────────────────────────────────
 
 _GUARD_LAST = {"t": 0.0}
@@ -335,7 +358,8 @@ def main():
             equity = get_account_equity() or 0
             positions = get_positions()
             pos_map = {p['symbol'].upper(): p for p in positions}
-            
+            n_priced = 0          # how many names we could actually price this sweep
+
             # Process existing positions for stop loss
             for symbol, pos in pos_map.items():
                 qty = float(pos.get('qty', 0))
@@ -356,7 +380,8 @@ def main():
                         current_price = market_val / qty
                 if current_price == 0:
                     continue
-                
+                n_priced += 1
+
                 pnl_pct = (current_price - avg_entry) / avg_entry
                 # Boxed wallet: same per-name width as the broker guard, which
                 # normally fires first; this is the backstop. Elsewhere: 5%.
@@ -441,6 +466,12 @@ def main():
             # Broker-side guards: make the resting trailing stops match the
             # book (boxed wallets only; rate-limits itself; never raises).
             _reconcile_guards()
+
+            # Heartbeat — written ONLY here, after a complete sweep. launchd
+            # restarts this process whenever it dies, so "is it running" means
+            # nothing; "did it just finish pricing everything" is the signal
+            # event_watcher's watchdog reads.
+            _write_heartbeat(len(pos_map), n_priced)
 
         except Exception as e:
             print(f"[watcher] Unexpected error in main loop: {e}")

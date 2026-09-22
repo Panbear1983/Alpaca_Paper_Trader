@@ -239,6 +239,159 @@ def check_alpaca_fills(state):
     return notified
 
 
+# ── Watchdog: are the protective processes actually WORKING? ────────────────
+# (2026-09-22) The price watcher has KeepAlive=true, so it is always "running";
+# it had also been crashing every loop for weeks without a single alert. This
+# check reads the heartbeat it writes only after a complete sweep, the
+# scheduler's last exit-engine stamp, and whether every whole-share High Risk
+# position has its broker guard. Silent when all is well; one Telegram per
+# episode, repeated every 30 minutes while it persists, one line on recovery.
+
+import time as _time
+import math as _math
+
+HEARTBEAT_FILE = os.path.join(ROOT, "diary", "watcher_heartbeat.json")
+SCHED_STATE    = os.path.join(ROOT, ".trading_schedule_state.json")
+HR_STRATEGY    = os.path.join(ROOT, "strategy_high_risk.json")
+HB_STALE_S     = 180        # watcher sweeps every 30 s; 3 min silent = dead
+SCHED_STALE_S  = 40 * 60    # exit engine runs every 15 min; 40 min = stalled
+REALERT_S      = 30 * 60
+STREAK_N       = 3          # consecutive checks before a "soft" failure alerts
+
+
+def _market_open_now():
+    """Alpaca's own clock (holiday-aware). Unsure → False → no alerts."""
+    try:
+        r = requests.get(f"{BASE_URL}/clock", headers=H_ALPACA, timeout=10)
+        return bool(r.json().get("is_open"))
+    except Exception:
+        return False
+
+
+def _hr_positions_and_guards():
+    """(whole-share positions, symbols with a resting guard) for the default
+    (High Risk) wallet. Two requests."""
+    pos = requests.get(f"{BASE_URL}/positions", headers=H_ALPACA, timeout=10).json()
+    orders = requests.get(f"{BASE_URL}/orders", headers=H_ALPACA,
+                          params={"status": "open", "limit": 200}, timeout=10).json()
+    whole = {p["symbol"].upper() for p in pos
+             if isinstance(p, dict) and _math.floor(abs(float(p.get("qty") or 0))) >= 1}
+    guarded = {o["symbol"].upper() for o in orders
+               if isinstance(o, dict) and o.get("type") == "trailing_stop" and o.get("side") == "sell"
+               and str(o.get("client_order_id") or "").startswith("pstop-")}
+    return whole, guarded
+
+
+def _guards_enabled():
+    try:
+        a = safe_load_json(HR_STRATEGY, {}).get("anchor") or {}
+        return bool(a.get("broker_stops"))
+    except Exception:
+        return False
+
+
+def _exits_on():
+    try:
+        cc = safe_load_json(HR_STRATEGY, {}).get("capitol_copier") or {}
+        return bool(cc.get("exits_on", cc.get("autorun_enabled", False)))
+    except Exception:
+        return False
+
+
+def _parse_iso_epoch(s):
+    try:
+        return datetime.fromisoformat(str(s)).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _since_open(now):
+    """Seconds since today's 09:30 New York. Both stamps we watch are only
+    written while the market is open, so for the first minutes of a session
+    they legitimately still show yesterday — alerting then would be a false
+    alarm at every open."""
+    try:
+        from zoneinfo import ZoneInfo
+        et = datetime.fromtimestamp(now, tz=ZoneInfo("America/New_York"))
+        opened = et.replace(hour=9, minute=30, second=0, microsecond=0)
+        return max(0.0, (et - opened).total_seconds())
+    except Exception:
+        return 10 ** 9
+
+
+def check_heartbeats(state, now=None, hb=None, sched=None, market_open=None,
+                     guards=None, exits_on=None, notify=None, since_open=None) -> int:
+    """Return the number of alerts sent. Every input can be injected for
+    tests; the defaults read the live files and the broker."""
+    if state.get("first_run"):
+        return 0
+    now = now if now is not None else _time.time()
+    if market_open is None:
+        market_open = _market_open_now()
+    if not market_open:
+        return 0                                    # nothing is expected to run
+    since_open = _since_open(now) if since_open is None else since_open
+
+    hb = hb if hb is not None else safe_load_json(HEARTBEAT_FILE, {})
+    sched = sched if sched is not None else safe_load_json(SCHED_STATE, {})
+    exits_on = _exits_on() if exits_on is None else exits_on
+    notify = notify or (lambda kind, msg: tg.notify_position_alert("WATCHDOG", msg, "critical"))
+
+    alerted = state.setdefault("_hb_alerted", {})
+    streaks = state.setdefault("_hb_streaks", {})
+    problems = {}
+
+    # 1. the price watcher's heartbeat
+    age = now - float(hb.get("epoch") or 0)
+    if age > HB_STALE_S and since_open > HB_STALE_S:
+        problems["watcher"] = (f"price watcher silent for {age/60:.0f} min — stops and "
+                               f"guards are NOT being maintained (last sweep {hb.get('ts') or 'never'})")
+    n_pos, n_priced = int(hb.get("n_positions") or 0), int(hb.get("n_priced") or 0)
+    streaks["unpriced"] = streaks.get("unpriced", 0) + 1 if n_pos and n_priced < n_pos else 0
+    if streaks["unpriced"] >= STREAK_N:
+        problems["unpriced"] = (f"price watcher is alive but could only price {n_priced} of "
+                                f"{n_pos} positions for {streaks['unpriced']} sweeps — its stops are blind")
+
+    # 2. the exit engine's last run (only meaningful when it is switched on)
+    if exits_on and since_open > SCHED_STALE_S:
+        last = _parse_iso_epoch((sched.get("high_risk") or {}).get("last_manage_at"))
+        if last and now - last > SCHED_STALE_S:
+            problems["scheduler"] = (f"exit engine has not run for {(now-last)/60:.0f} min "
+                                     f"(software stops / trims / profit tiers are stalled)")
+
+    # 3. every whole-share position must have its broker guard
+    if _guards_enabled() or guards is not None:
+        try:
+            whole, guarded = guards if guards is not None else _hr_positions_and_guards()
+            missing = sorted(whole - guarded)
+        except Exception as e:
+            missing, whole = [], set()
+            problems.setdefault("guards_unknown", f"could not check broker guards: {e}")
+        streaks["unguarded"] = streaks.get("unguarded", 0) + 1 if missing else 0
+        if streaks["unguarded"] >= STREAK_N:
+            problems["guards"] = (f"no broker stop resting for {', '.join(missing)} for "
+                                  f"{streaks['unguarded']} checks — reconciler is not re-arming")
+
+    sent = 0
+    for kind, msg in problems.items():
+        last = float(alerted.get(kind) or 0)
+        if now - last >= REALERT_S:
+            try:
+                notify(kind, msg)
+                sent += 1
+            except Exception as e:
+                print(f"[watchdog] notify failed: {e}")
+            alerted[kind] = now
+    for kind in [k for k in alerted if k not in problems]:
+        try:
+            notify(kind, f"recovered: {kind} is back to normal")
+            sent += 1
+        except Exception:
+            pass
+        alerted.pop(kind, None)
+    return sent
+
+
 # ── Main runner ─────────────────────────────────────────────────────────────
 
 def run():
@@ -258,6 +411,9 @@ def run():
     fills  = check_alpaca_fills(state)
     if fills > 0: save_watcher_state(state)
 
+    dog    = check_heartbeats(state)
+    save_watcher_state(state)          # streak counters change every tick
+
     if first:
         # First run: silently seed state, then exit
         state["first_run"] = False
@@ -266,10 +422,10 @@ def run():
         return
 
     save_watcher_state(state) # Final save to update last_run_at timestamp
-    total = closed + pool + copied + fills
+    total = closed + pool + copied + fills + dog
     if total > 0:
         print(f"[event_watcher] notified: {closed} closed, {pool} pool, "
-              f"{copied} copied, {fills} fills")
+              f"{copied} copied, {fills} fills, {dog} watchdog")
     else:
         print(f"[event_watcher] no new events")
 
