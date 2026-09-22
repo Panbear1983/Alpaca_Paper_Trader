@@ -17,7 +17,12 @@ load_dotenv()
 
 API_KEY    = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL   = os.getenv("ALPACA_BASE_URL")
+# Alpaca trading endpoints all live under /v2. ALPACA_BASE_URL has been
+# written both ways; a base missing the suffix 404s on every request and
+# the error handling here reads that as "nothing found" rather than
+# "broken". Normalise through the one shared helper.
+from wallets import norm_base as _norm_base
+BASE_URL   = _norm_base(os.getenv("ALPACA_BASE_URL", ""))
 DATA_URL   = "https://data.alpaca.markets/v2"
 
 HEADERS = {
@@ -28,11 +33,21 @@ HEADERS = {
 LOG_FILE = os.path.join(os.path.dirname(__file__), "performance_log.json")
 
 # Politician attribution — which tickers came from whom
-CAPITOL_COPIER_TICKERS = {
-    "MU", "GOOGL", "DIS", "NDAQ", "TGT", "PINS",
-    "CAT", "SBUX", "MS", "BAC", "JPM", "AMZN",
-    "META", "NVDA", "MSFT", "HD", "JNJ", "TMO",
-}
+# Trade attribution now comes from client_order_id, which capitol_copier stamps
+# at placement as "{source}-{YYYYMMDD}-{hex}". The old approach — a hardcoded
+# ticker list, then a fallback that labelled everything "capitol_copier" — meant
+# five engines' trades were pooled under one name and could never be told apart.
+KNOWN_SOURCES = {"isr", "swing", "intraday", "copier", "watcher",
+                 "hedge", "picker", "rebalance", "manual", "anchor", "other"}
+
+
+def source_of(order):
+    """Engine that placed this order, or 'unattributed' for anything predating
+    the stamping (their client_order_id is a bare Alpaca UUID)."""
+    coid = (order.get("client_order_id") or "")
+    head = coid.split("-", 1)[0].lower()
+    return head if head in KNOWN_SOURCES else "unattributed"
+
 
 
 def load_log():
@@ -49,13 +64,34 @@ def save_log(log):
 
 
 def fetch_filled_orders(since_days=90):
+    """Every filled order in the window, oldest first.
+
+    A single request is capped at 500 rows and, with direction=asc, returns the
+    OLDEST 500 — so the log froze at 2026-08-25 / 194 trades while trading went
+    on. Alpaca's /orders has no page token; the only cursor is `after`, so we
+    walk forward from the last row's submitted_at until a page comes back short.
+    """
     after = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
-    r = requests.get(
-        f"{BASE_URL}/orders",
-        headers=HEADERS,
-        params={"status": "filled", "limit": 500, "after": after, "direction": "asc"}
-    )
-    return r.json() if r.status_code == 200 else []
+    out, seen = [], set()
+    for _ in range(40):                       # 20,000 orders — far past anything here
+        r = requests.get(
+            f"{BASE_URL}/orders",
+            headers=HEADERS,
+            params={"status": "closed", "limit": 500, "after": after, "direction": "asc"},
+            timeout=30,
+        )
+        if r.status_code != 200:
+            break
+        page = r.json() or []
+        fresh = [o for o in page if o.get("id") not in seen]
+        for o in fresh:
+            seen.add(o.get("id"))
+            if o.get("status") == "filled":
+                out.append(o)
+        if len(page) < 500 or not fresh:
+            break
+        after = page[-1].get("submitted_at") or page[-1].get("created_at") or after
+    return out
 
 
 def fetch_spy_return(start_date, end_date):
@@ -101,6 +137,8 @@ def pair_trades(orders):
         if side == "buy" and avg_price > 0:
             buy_queue[symbol].append({
                 "order_id": order_id,
+                "source": source_of(o),
+                "entry_ts": filled_at,
                 "qty": qty,
                 "entry_price": avg_price,
                 "entry_date": filled_at[:10],
@@ -121,15 +159,19 @@ def pair_trades(orders):
                     datetime.fromisoformat(sell_date) -
                     datetime.fromisoformat(buy["entry_date"])
                 ).days if buy["entry_date"] and sell_date else 0
+                hold_hours = None
+                try:
+                    _a = datetime.fromisoformat(str(buy.get("entry_ts", "")).replace("Z", "+00:00"))
+                    _b = datetime.fromisoformat(str(filled_at).replace("Z", "+00:00"))
+                    hold_hours = round((_b - _a).total_seconds() / 3600.0, 3)
+                except Exception:
+                    pass
                 pnl_usd = (sell_price - buy["entry_price"]) * matched_qty
 
-                # Attribution: TSLA/AAPL are legacy holdouts; EVERYTHING else on
-                # this account is the swing book (capitol copies + swing_buyer).
-                # The old hardcoded CAPITOL_COPIER_TICKERS set went stale and
-                # tagged the whole current book "other", starving
-                # sunday_review's adjustment rules of data.
-                strategy = "tsla_strategy" if symbol == "TSLA" else \
-                           "other" if symbol == "AAPL" else "capitol_copier"
+                # Credit the trade to the engine that OPENED it. That matters
+                # here because the engines have been closing each other's
+                # positions — crediting the seller would blame the wrong one.
+                strategy = buy.get("source") or "unattributed"
 
                 closed.append({
                     "symbol":       symbol,
@@ -140,6 +182,9 @@ def pair_trades(orders):
                     "entry_date":   buy["entry_date"],
                     "exit_date":    sell_date,
                     "hold_days":    hold_days,
+                    "hold_hours":   hold_hours,
+                    "entry_ts":     buy.get("entry_ts"),
+                    "exit_ts":      filled_at,
                     "return_pct":   round(return_pct, 6),
                     "pnl_usd":      round(pnl_usd, 2),
                     "buy_order_id": buy["order_id"],

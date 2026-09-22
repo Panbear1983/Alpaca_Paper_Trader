@@ -17,7 +17,9 @@
       "industrial"
     ],
     "sentiment_veto_enabled": false,
-    "autorun_enabled": false
+    "autorun_enabled": false,
+    "exits_on": true,
+    "copy_on": false
   },
   "pool": {
     "max_size": 4,
@@ -96,7 +98,8 @@
     "top_n": 6,
     "gross_mult": 4.0,
     "stop_pct": 0.03,
-    "flatten_minutes": 12
+    "flatten_minutes": 12,
+    "regime_gate": true
   },
   "scoring_weights": {
     "realized_return_alpha": 0.3,
@@ -135,6 +138,23 @@
     "copy_time_et": "10:30",
     "window_minutes": 20,
     "weekdays_only": true
+  },
+  "risk": {
+    "max_position_pct": 0.25,
+    "max_gross_exposure": 2.0,
+    "gross_by_regime": {
+      "bull": 2.0,
+      "neutral": 1.25,
+      "bear": 0.75
+    },
+    "hedge_by_regime": {
+      "bull": 0.0,
+      "neutral": 0.05,
+      "bear": 0.15
+    }
+  },
+  "isr_alpha": {
+    "regime_gate": true
   },
   "anchor": {
     "enabled": false,

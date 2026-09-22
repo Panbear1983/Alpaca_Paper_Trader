@@ -10,7 +10,15 @@ import sys
 import subprocess
 import re
 import json
+import requests
 from datetime import datetime
+from pathlib import Path
+
+# The scheduled command executes this file from scripts/, so explicitly expose
+# the repository root for wallet_report.py and wallets.py imports.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 # ---------- Configuration ----------
 LOG_DIR = '/Users/peter/GitHub/Alpaca_Paper_Trader/logs/daily_reports'
@@ -26,7 +34,7 @@ def get_wallet_report():
     try:
         result = subprocess.run(
             ['python', WALLET_REPORT_SCRIPT, '--no-push'],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=60
         )
         if result.returncode != 0:
             sys.exit(f"ERROR: wallet_report.py failed: {result.stderr}")
@@ -83,6 +91,111 @@ def parse_high_risk_section(report_text):
         'trades_exist': trades_exist,
         'full_section': section
     }
+
+
+def fetch_high_risk_fills():
+    """Read every current-ET-day Alpaca fill for the High Risk account.
+
+    This is the authoritative activity ledger for the daily report.  It does
+    not infer trades from portfolio movers or prose, and it follows page tokens
+    when the broker returns more than one page.
+    """
+    import wallet_report as wr
+    import wallets
+
+    credentials = wallets.resolve('High Risk')
+    if credentials is None:
+        return [], 'High Risk Alpaca credentials are unavailable'
+    key, secret, base = credentials
+    start_et = datetime.now(wr.ET).replace(hour=0, minute=0, second=0, microsecond=0)
+    token = None
+    raw_fills, seen = [], set()
+    try:
+        while True:
+            params = {
+                'activity_types': 'FILL',
+                'after': start_et.isoformat(),
+                'direction': 'asc',
+                'page_size': 100,
+            }
+            if token:
+                params['page_token'] = token
+            response = requests.get(
+                f'{base}/account/activities',
+                headers={'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret,
+                         'Accept': 'application/json'},
+                params=params,
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            activities = payload if isinstance(payload, list) else payload.get('activities', [])
+            if not isinstance(activities, list):
+                return [], 'Alpaca returned an unexpected activities response'
+            for activity in activities:
+                activity_id = str(activity.get('id') or '')
+                if activity_id and activity_id in seen:
+                    continue
+                if activity_id:
+                    seen.add(activity_id)
+                timestamp = datetime.fromisoformat(
+                    str(activity.get('transaction_time', '')).replace('Z', '+00:00')
+                )
+                raw_fills.append({
+                    'time_et': timestamp.astimezone(wr.ET).strftime('%H:%M'),
+                    'side': 'SELL' if str(activity.get('side', '')).lower().startswith('sell') else 'BUY',
+                    'symbol': str(activity.get('symbol') or '?'),
+                    'qty': float(activity.get('qty') or activity.get('cum_qty') or 0),
+                    'price': float(activity.get('price') or 0),
+                    '_timestamp': timestamp,
+                })
+            if isinstance(payload, dict):
+                token = payload.get('next_page_token')
+            elif len(activities) >= 100:
+                # Alpaca's activities endpoint returns a bare list. Its next-page
+                # cursor is the final activity ID rather than a response field.
+                token = str(activities[-1].get('id') or '') or None
+            else:
+                token = None
+            if not token:
+                break
+    except (requests.RequestException, TypeError, ValueError) as exc:
+        return [], f'Alpaca fill ledger unavailable: {type(exc).__name__}'
+
+    raw_fills.sort(key=lambda item: item['_timestamp'])
+    for fill in raw_fills:
+        fill.pop('_timestamp', None)
+    return raw_fills, None
+
+
+def format_fills(fills):
+    if not fills:
+        return 'none'
+    return '; '.join(
+        f"{fill['time_et']} {fill['side']} {fill['symbol']} {fill['qty']:g} @ ${fill['price']:,.2f}"
+        for fill in fills
+    )
+
+
+def summarize_fills(fills):
+    """Compress the complete fill ledger into a report-sized factual activity line."""
+    if not fills:
+        return 'no fills recorded by Alpaca for the current ET trading day'
+    by_symbol = {}
+    for fill in fills:
+        key = (fill['side'], fill['symbol'])
+        by_symbol[key] = by_symbol.get(key, 0) + fill['qty']
+    ordered = sorted(by_symbol.items(), key=lambda item: (-item[1], item[0]))
+    top = ', '.join(
+        f"{side} {symbol} {quantity:g}"
+        for ((side, symbol), quantity) in ordered[:4]
+    )
+    first, last = fills[0], fills[-1]
+    return (
+        f"{len(fills)} fills across {len(by_symbol)} buy/sell symbol groups; "
+        f"largest activity: {top}; "
+        f"window {first['time_et']}–{last['time_et']} ET"
+    )
 
 def get_recent_stats(log_dir, lookback=LOOKBACK_DAYS):
     """Compute win-rate, avg P&L, profit factor from last lookback log files."""
@@ -223,26 +336,23 @@ def main():
     if not high_risk:
         print("ERROR: Could not parse High Risk section")
         sys.exit(1)
-    # 3. Build ground-truth half
-    if high_risk['trades_exist'] and high_risk['movers_line']:
-        tickers = re.findall(r'[A-Z]{2,5}', high_risk['movers_line'])
-        if tickers:
-            traded_desc = f"traded {', '.join(tickers[:3])} based on signal"
-        else:
-            traded_desc = "executed intraday trades"
-    elif not high_risk['trades_exist']:
-        traded_desc = "no trades executed"
+    # 3. Read the authoritative High Risk fill ledger, rather than inferring
+    # activity from wording or mark-to-market movers in the rendered report.
+    fills, fill_error = fetch_high_risk_fills()
+    trades_exist = bool(fills)
+    if fill_error:
+        traded_desc = fill_error
     else:
-        traded_desc = "managed existing positions"
+        traded_desc = summarize_fills(fills)
     day_pl = high_risk['day_pl']
     day_pct = high_risk['day_pct']
     pnl_str = f"${abs(day_pl):,.0f}" if day_pl != 0 else "$0"
     pnl_sign = "+" if day_pl >= 0 else "-"
     pct_sign = "+" if day_pct >= 0 else "-"
     ground_lines = [
-        f"Today I traded {traded_desc}.",
+        f"High Risk Alpaca fills ({len(fills)}): {traded_desc}.",
         f"Day’s P&L: {pnl_sign}{pnl_str} ({pct_sign}{abs(day_pct):.1f}%).",
-        f"Signal worked/didn’t because: {'signal captured upside move' if day_pl >= 0 else 'mark-to-market pressure outweighed signal' if high_risk['trades_exist'] else 'no new signals; existing positions moved with market'}",
+        f"Signal worked/didn’t because: {'signal captured upside move' if day_pl >= 0 else 'mark-to-market pressure outweighed signal' if trades_exist else 'no Alpaca fills were recorded; existing positions moved with market'}",
         f"Stop hit? {'No' if abs(day_pct) < 5.0 else 'Yes'}",
         f"Next session I will {'stay same and wait for clear signals' if abs(day_pct) <= 2.0 else 'review signal thresholds; stay same if edge remains'}"
     ]
@@ -263,9 +373,9 @@ def main():
     # 5. Build prompt and get LLM sentence
     prompt = build_prompt(ground_half, isr_context, recent_stats, yesterday_report)
     llm_sentence = get_llm_sentence(prompt, recent_stats)
-    # 6. Combine
+    # 6. Keep the existing concise cron-report contract while retaining the
+    # complete broker ledger as the source for the factual activity summary.
     full_report = f"{ground_half} {llm_sentence}"
-    # Trim to ~100 words if needed
     words = full_report.split()
     if len(words) > 100:
         full_report = ' '.join(words[:100]) + '...'
@@ -279,7 +389,7 @@ def main():
     if os.path.islink(latest_link) or os.path.exists(latest_link):
         os.remove(latest_link)
     os.symlink(log_file, latest_link)
-    # 8. Output for delivery
+    # 8. Output for the existing Hermes cron delivery path
     print(full_report)
 
 if __name__ == '__main__':

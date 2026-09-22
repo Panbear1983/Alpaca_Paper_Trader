@@ -56,6 +56,8 @@ _TABLE: dict[str, tuple[str, str]] = {
     "col.price": ("PRICE", "現價"),
     "col.pl_usd": ("P&L $", "損益 $"),
     "col.pl_pct": ("P&L %", "損益 %"),
+    "col.day_pl_usd": ("DAY P&L $", "當日損益 $"),
+    "col.day_pl_pct": ("DAY P&L %", "當日損益 %"),
     "col.mkt_val": ("MKT VALUE", "總估值"),
     "col.cost": ("TOTAL COST", "總成本"),
     "col.side": ("SIDE", "方向"),

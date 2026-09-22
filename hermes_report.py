@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+from zoneinfo import ZoneInfo
 import json
 import os
 import sys
@@ -59,7 +60,10 @@ HEADERS = {
     "Accept":              "application/json",
 }
 
-ET = dt.timezone(dt.timedelta(hours=-4))   # ET (no DST correction needed for gate logic)
+# Real US/Eastern, DST-aware. This was a fixed dt.timezone(-4); that is only
+# right while EDT is in force and goes an hour wrong from 2026-11-01,
+# which would skew today_et, the 16:xx close gate and displayed fill times.
+ET = ZoneInfo("America/New_York")
 
 # Known politician names — bioguide ID → display name + party
 POLITICIAN_NAMES: dict[str, tuple[str, str]] = {

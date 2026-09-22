@@ -20,6 +20,7 @@ Modes:
 """
 
 import os, json, re, requests
+from pathlib import Path
 from datetime import datetime, date, timedelta, timezone
 from dotenv import load_dotenv
 
@@ -37,7 +38,9 @@ load_dotenv()
 
 API_KEY    = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL   = os.getenv("ALPACA_BASE_URL")
+BASE_URL   = (lambda u: u if not u else (u.rstrip("/") if u.rstrip("/").endswith("/v2")
+                                        else u.rstrip("/") + "/v2"))(
+                 os.getenv("ALPACA_BASE_URL") or "https://paper-api.alpaca.markets/v2")
 DATA_URL   = "https://data.alpaca.markets/v2"
 
 ALPACA_HEADERS = {
@@ -64,7 +67,7 @@ def _pos_state_file() -> str:
     return strategies.state_path(".position_state.json")
 
 # Symbols never managed by Capitol Copier (legacy / test holdings)
-NON_CC_SYMBOLS = ("TSLA", "AAPL")
+NON_CC_SYMBOLS = ()   # 2026-08-30: TSLA/AAPL exemption removed — the $27.9k TSLA position had no exit engine
 
 
 # ── State ────────────────────────────────────────────────────────────────────
@@ -141,19 +144,310 @@ def fetch_politician_trades(pol_id, per_page=96):
 
 # ── Alpaca helpers ───────────────────────────────────────────────────────────
 
+# ── Per-name concentration cap ───────────────────────────────────────────────
+# Every engine's orders funnel through place_market_order(), so this is the one
+# place a size limit actually binds. It lives in code, not only in config,
+# because strategy_high_risk.json is a file the agent is explicitly allowed to
+# rewrite (and wb_dynamic_strategy.py rewrites it every 15 minutes).
+#
+# Why it exists: on 2026-08-17 the wallet bought seven names at $43,120 each on
+# a $91k account — 47% of equity per position — and lost 18.5% the next session.
+# Nothing in the system said no.
+HARD_MAX_POSITION_PCT = 1.0      # code ceiling; config may lower this, never raise it
+
+# Total long exposure, not just per name. The per-name cap alone leaves the door
+# open: intraday_momentum sizes at equity * gross_mult / top_n, so 20 names at
+# 20% each all pass a 25% per-name check while together being 4x equity. A 7%
+# adverse move on that is about -28% — worse than 2026-08-18, just spread wider.
+# 2.0 rather than 0.9 because intraday is designed around intraday buying power
+# and flattening before the close; 1x would break its premise outright.
+HARD_MAX_GROSS_EXPOSURE = 2.0
+_CAP_CACHE = {"t": 0.0, "equity": None, "positions": None}
+_CAP_CACHE_TTL = 30               # seconds; keeps the cap off the rate limiter
+
+
+class OrderRejected(Exception):
+    """Raised when an order would breach the concentration cap."""
+
+
+def _max_position_pct():
+    """Configured cap, clamped to the code ceiling."""
+    try:
+        v = float((load_config().get("risk") or {}).get(
+            "max_position_pct", HARD_MAX_POSITION_PCT))
+    except Exception:
+        v = HARD_MAX_POSITION_PCT
+    if v != v or v <= 0:                      # NaN or nonsense
+        return HARD_MAX_POSITION_PCT
+    return min(v, HARD_MAX_POSITION_PCT)
+
+
+def _cap_snapshot():
+    """(equity, {sym: market_value}) with a short cache."""
+    import time
+    now = time.time()
+    if now - _CAP_CACHE["t"] < _CAP_CACHE_TTL and _CAP_CACHE["equity"] is not None:
+        return _CAP_CACHE["equity"], _CAP_CACHE["positions"]
+    eq = get_account_equity()
+    pos = {p["symbol"].upper(): abs(float(p.get("market_value") or 0))
+           for p in get_positions()}
+    _CAP_CACHE.update({"t": now, "equity": eq, "positions": pos})
+    return eq, pos
+
+
+def _order_value(ticker, notional, qty):
+    """Approximate USD value of a proposed order."""
+    if notional:
+        return float(notional)
+    if not qty:
+        return 0.0
+    try:
+        r = requests.get(f"{DATA_URL}/stocks/{ticker}/trades/latest",
+                         headers=ALPACA_HEADERS, timeout=10)
+        if r.status_code == 200:
+            return float(qty) * float(r.json().get("trade", {}).get("p") or 0)
+    except Exception:
+        pass
+    return 0.0
+
+
+DEFAULT_GROSS_BY_REGIME = {"bull": 2.00, "neutral": 1.25, "bear": 0.75}
+
+
+def current_regime():
+    """'bull' | 'neutral' | 'bear' | 'unknown'. Cached per session upstream."""
+    try:
+        import market_context
+        return market_context.regime_state().get("state", "unknown")
+    except Exception:
+        return "unknown"
+
+
+def _max_gross_exposure():
+    """Configured gross limit, scaled by market regime, clamped to the ceiling.
+
+    Deleveraging happens on the way INTO a downturn rather than after one. The
+    regime can only ever reduce the limit — never raise it past
+    HARD_MAX_GROSS_EXPOSURE — and 'unknown' falls back to the unconditional
+    figure rather than guessing a direction.
+
+    This blocks new buys only. Nothing here forces a sale, so a regime flip
+    never liquidates an existing book.
+    """
+    try:
+        risk = load_config().get("risk") or {}
+        v = float(risk.get("max_gross_exposure", HARD_MAX_GROSS_EXPOSURE))
+    except Exception:
+        risk, v = {}, HARD_MAX_GROSS_EXPOSURE
+    if v != v or v <= 0:
+        v = HARD_MAX_GROSS_EXPOSURE
+    base = min(v, HARD_MAX_GROSS_EXPOSURE)
+
+    regime = current_regime()
+    if regime == "unknown":
+        return base
+    by_regime = risk.get("gross_by_regime") or DEFAULT_GROSS_BY_REGIME
+    try:
+        r = float(by_regime.get(regime, base))
+    except Exception:
+        r = base
+    if r != r or r <= 0:
+        r = base
+    return min(base, r, HARD_MAX_GROSS_EXPOSURE)
+
+
+def check_gross_cap(ticker, side, notional=None, qty=None):
+    """(allowed, reason). Total long exposure across the whole book.
+
+    pool.max_total_exposure_pct already exists but is only honoured by
+    swing_buyer and capitol_copier — intraday_momentum and isr_alpha, which do
+    most of the trading, ignore it. Checking here catches every engine.
+    """
+    if str(side).lower() != "buy":
+        return True, ""
+    cap = _max_gross_exposure()
+    try:
+        equity, positions = _cap_snapshot()
+    except Exception as e:
+        return False, f"cannot read equity/positions to enforce gross cap ({e})"
+    if not equity or equity <= 0:
+        return False, "equity unavailable — refusing to size a position blind"
+    add = _order_value(ticker, notional, qty)
+    if add <= 0:
+        return False, f"cannot price the order for {ticker} — refusing"
+    gross_now = sum(positions.values())
+    after = gross_now + add
+    if after > equity * cap:
+        return False, (f"gross exposure would reach ${after:,.0f} = "
+                       f"{after / equity:.2f}x equity, over the {cap:.2f}x cap "
+                       f"(book ${gross_now:,.0f}, adding ${add:,.0f})")
+    return True, ""
+
+
+def check_position_cap(ticker, side, notional=None, qty=None):
+    """(allowed, reason). Buys only — selling always reduces exposure."""
+    if str(side).lower() != "buy":
+        return True, ""
+    cap = _max_position_pct()
+    try:
+        equity, positions = _cap_snapshot()
+    except Exception as e:
+        return False, f"cannot read equity/positions to enforce cap ({e})"
+    if not equity or equity <= 0:
+        # Fail closed. An unbounded order is the exact risk this guards against,
+        # and a blocked trade is recoverable where a 47% position is not.
+        return False, "equity unavailable — refusing to size a position blind"
+    add = _order_value(ticker, notional, qty)
+    if add <= 0:
+        return False, f"cannot price the order for {ticker} — refusing"
+    held = positions.get(str(ticker).upper(), 0.0)
+    after = held + add
+    if after > equity * cap:
+        return False, (f"{ticker} would reach ${after:,.0f} = "
+                       f"{after / equity * 100:.0f}% of ${equity:,.0f} equity, "
+                       f"over the {cap * 100:.0f}% cap "
+                       f"(holds ${held:,.0f}, adding ${add:,.0f})")
+    return True, ""
+
+
+# ── Trade attribution ────────────────────────────────────────────────────────
+# Five engines trade this account and performance_tracker used to guess which
+# one by looking at the ticker, defaulting everything to "capitol_copier". That
+# made the profit factor an average across five different strategies with no way
+# to separate them. Stamping the source into client_order_id at placement makes
+# every fill traceable to the engine that opened it — Alpaca echoes the field
+# back on the order, so nothing extra needs fetching.
+SOURCE_BY_MODULE = {
+    "isr_alpha.executor":    "isr",
+    "swing_buyer":           "swing",
+    "intraday_momentum":     "intraday",
+    "capitol_copier":        "copier",
+    "__main__":              "copier",     # capitol_copier run directly
+    "price_watcher":         "watcher",
+    "inverse_hedge":         "hedge",
+    "opportunistic_picker":  "picker",
+    "rebalance_top_n":       "rebalance",
+    "anchor_trade":          "anchor",
+    "tui":                   "manual",
+    "manual_trade":          "manual",
+}
+KNOWN_SOURCES = set(SOURCE_BY_MODULE.values()) | {"other"}
+
+
+def _caller_source(depth=2):
+    """Which engine is placing this order, from the calling module's name.
+
+    Uses sys._getframe rather than inspect.stack(): the latter builds full
+    frame objects for the whole stack and is far too slow to sit on the order
+    path. Deriving it here means none of the 25 call sites need to change.
+
+    Any script run directly (`python3 anchor_trade.py ...`) has __name__ ==
+    "__main__" in its own globals, same as every other directly-run script —
+    so __name__ alone can't tell anchor_trade.py apart from tui.py apart from
+    capitol_copier.py itself. Fall back to the file's own name (__file__) in
+    that case, which is stable regardless of how the script was launched.
+    """
+    import sys as _sys
+    try:
+        g = _sys._getframe(depth).f_globals
+    except Exception:
+        return "other"
+    name = g.get("__name__", "") or ""
+    if name == "__main__":
+        f = g.get("__file__", "") or ""
+        if f:
+            name = Path(f).stem
+    if name in SOURCE_BY_MODULE:
+        return SOURCE_BY_MODULE[name]
+    return SOURCE_BY_MODULE.get(name.rsplit(".", 1)[-1], "other")
+
+
+def _client_order_id(source):
+    """`{source}-{YYYYMMDD}-{8 hex}` — under Alpaca's 128-char limit, unique,
+    and the source is readable as the first '-' delimited field."""
+    import uuid
+    return f"{source}-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8]}"
+
+
+def _log_guardrail(ticker, side, notional, qty, which, why):
+    """Record a blocked order so the daily oversight run can see it.
+
+    Without this the block is printed to a scheduler log and thrown away, so
+    "the cap stopped three orders today" is unanswerable — the guardrails would
+    be invisible in exactly the review meant to judge them.
+    """
+    try:
+        import json as _json
+        from datetime import datetime as _dt
+        d = _HERE / "diary" if "_HERE" in globals() else Path(__file__).resolve().parent / "diary"
+        d.mkdir(parents=True, exist_ok=True)
+        row = {"ts": _dt.now().isoformat(timespec="seconds"), "symbol": ticker,
+               "side": side, "notional": notional, "qty": qty,
+               "cap": which.replace("check_", "").replace("_cap", ""),
+               "reason": why, "source": _caller_source(depth=3)}
+        with open(d / "guardrail_log.jsonl", "a") as f:
+            f.write(_json.dumps(row) + "\n")
+    except Exception:
+        pass          # never let logging block an order path decision
+
+
+def _log_manual_trade(ticker, side, notional, qty, order):
+    """Record every order Peter places by hand (source == "manual", i.e. through
+    the TUI) so his own buying pattern on this wallet has a running record,
+    separate from what the automated engines and Wanna Buffet do."""
+    try:
+        import json as _json
+        d = Path(__file__).resolve().parent / "diary"
+        d.mkdir(parents=True, exist_ok=True)
+        row = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "symbol": ticker, "side": side, "notional": notional, "qty": qty,
+            "order_id": order.get("id"), "client_order_id": order.get("client_order_id"),
+            "status": order.get("status"),
+        }
+        with open(d / "manual_trades.jsonl", "a") as f:
+            f.write(_json.dumps(row) + "\n")
+    except Exception:
+        pass          # never let logging block an order path decision
+
+
+def _entry_gate(ticker, side, notional=None, qty=None):
+    """The anchor-plan fence (entry_gate.py): universe, entry window, daily-loss
+    halt, entries-per-name, consecutive-loss halt. Buy-only, like the caps.
+    Fails closed: if the gate itself cannot run, a buy does not go through."""
+    try:
+        import entry_gate
+        return entry_gate.check_entry(ticker, side, notional, qty)
+    except Exception as e:
+        return False, f"gate: entry gate failed to run ({type(e).__name__}: {e}) — refusing the buy", "gate"
+
+
 def place_market_order(ticker, side, notional=None, qty=None):
+    for _check in (check_position_cap, check_gross_cap, _entry_gate):
+        res = _check(ticker, side, notional, qty)
+        ok, why = res[0], res[1]
+        if not ok:
+            which = res[2] if len(res) > 2 and res[2] else _check.__name__
+            print(f"[cap] BLOCKED buy {ticker}: {why}")
+            _log_guardrail(ticker, side, notional, qty, which, why)
+            return {"blocked_by_cap": True, "reason": why, "symbol": ticker}
+    source = _caller_source()
     payload = {
-        "symbol":        ticker,
-        "side":          side,
-        "type":          "market",
-        "time_in_force": "day",
+        "symbol":          ticker,
+        "side":            side,
+        "type":            "market",
+        "time_in_force":   "day",
+        "client_order_id": _client_order_id(source),
     }
     if notional:
         payload["notional"] = str(round(notional, 2))
     elif qty:
         payload["qty"] = str(qty)
     r = requests.post(f"{BASE_URL}/orders", headers=ALPACA_HEADERS, json=payload)
-    return r.json()
+    result = r.json()
+    if source == "manual" and isinstance(result, dict) and result.get("id"):
+        _log_manual_trade(ticker, side, notional, qty, result)
+    return result
 
 
 def get_position(ticker):
@@ -199,6 +493,81 @@ def load_pos_state():
 def save_pos_state(pstate):
     with open(_pos_state_file(), "w") as f:
         json.dump(pstate, f, indent=2)
+
+
+def _anchor_names():
+    try:
+        return {str(x).upper() for x in (load_config().get("anchor") or {}).get("universe") or []}
+    except Exception:
+        return set()
+
+
+def _trim_to_caps(positions, equity, dry_run, acts):
+    """Sell down over-cap holdings. Returns the number of sell orders sent.
+
+    1. Any single name above equity x max_position_pct is cut back to the cap.
+    2. If the whole book is still above equity x gross cap, the largest
+       non-anchor names are cut pro-rata until it is under.
+    Shares come from qty_available (Alpaca rejects a sell above it while an
+    open order exists) and are rounded to 4 dp like the take-profit path.
+    """
+    import math
+    if not equity or equity <= 0 or not positions:
+        return 0
+    tag = "[DRY] " if dry_run else ""
+    name_cap = equity * _max_position_pct()
+    sent = 0
+    book = {}
+    for p in positions:
+        sym = p["symbol"]
+        mv  = abs(float(p.get("market_value", 0) or 0))
+        px  = float(p.get("current_price", 0) or 0)
+        avail = abs(float(p.get("qty_available", p.get("qty", 0)) or 0))
+        book[sym] = {"mv": mv, "px": px, "avail": avail}
+        if px <= 0 or avail <= 0:
+            continue
+        if mv > name_cap * 1.005:                     # 0.5% tolerance: no dust trades
+            excess = mv - name_cap
+            qty = min(avail, round(excess / px, 4))
+            if qty <= 0:
+                continue
+            print(f"  {tag}✂ TRIM-CAP(name) {sym}  ${mv:,.0f} = {mv/equity*100:.0f}% of equity, "
+                  f"cap {name_cap/equity*100:.0f}%  → sell {qty:g} (${qty*px:,.0f})")
+            acts.append(f"✂ TRIM `{sym}` ${qty*px:,.0f} (over {name_cap/equity*100:.0f}% cap)")
+            if not dry_run:
+                place_market_order(sym, "sell", qty=qty)
+                _log_guardrail(sym, "sell", None, qty, "trim",
+                           f"{sym} at {mv/equity*100:.0f}% of equity, over the {name_cap/equity*100:.0f}% cap — sold ${qty*px:,.0f}")
+            book[sym]["mv"] -= qty * px
+            book[sym]["avail"] -= qty
+            sent += 1
+    gross_cap = equity * _max_gross_exposure()
+    gross = sum(b["mv"] for b in book.values())
+    if gross > gross_cap * 1.005:
+        anchors = _anchor_names()
+        excess = gross - gross_cap
+        # Largest non-anchor names first, each cut as far as needed — one or two
+        # orders rather than a dozen dust sells across the whole book.
+        pool = sorted(((s_, b) for s_, b in book.items()
+                       if s_ not in anchors and b["px"] > 0 and b["avail"] > 0),
+                      key=lambda kv: -kv[1]["mv"])
+        for sym, b in pool:
+            if excess <= 50:
+                break
+            cut = min(b["mv"], excess)
+            qty = min(b["avail"], round(cut / b["px"], 4))
+            if qty <= 0 or qty * b["px"] < 50:
+                continue
+            excess -= qty * b["px"]
+            print(f"  {tag}✂ TRIM-CAP(gross) {sym}  book ${gross:,.0f} = {gross/equity:.2f}x equity, "
+                  f"cap {gross_cap/equity:.2f}x  → sell {qty:g} (${qty*b['px']:,.0f})")
+            acts.append(f"✂ TRIM `{sym}` ${qty*b['px']:,.0f} (book over {gross_cap/equity:.2f}x)")
+            if not dry_run:
+                place_market_order(sym, "sell", qty=qty)
+                _log_guardrail(sym, "sell", None, qty, "trim",
+                           f"book at {gross/equity:.2f}x equity, over the {gross_cap/equity:.2f}x cap — sold ${qty*b['px']:,.0f} of {sym}")
+            sent += 1
+    return sent
 
 
 def manage_open_positions(cfg, dry_run=False):
@@ -260,6 +629,21 @@ def manage_open_positions(cfg, dry_run=False):
             place_market_order(sym, "sell", qty=qty)
         pstate.pop(sym, None)
         actions += 1
+
+    # ── Consolidation pass 0: trim anything over the caps ───────────────────
+    # The caps at check_position_cap / check_gross_cap refuse NEW buys only, so a
+    # book that is already over them stays over them forever — on 2026-08-29
+    # TTAN, TSLA and TSM sat near 40% of equity each and the book at 2.34x while
+    # 16 buys were refused and nothing sold. This pass sells the excess every
+    # tick. Note the gross cap is regime-scaled (_max_gross_exposure), so a
+    # bull->bear flip now forces sales; the docstring above that function used
+    # to promise the opposite, and Peter chose this behaviour on 2026-08-30.
+    trimmed = _trim_to_caps(positions, equity, dry_run, acts)
+    if trimmed:
+        actions += trimmed
+        _CAP_CACHE["t"] = 0.0          # the next cap check must see the smaller book
+        positions = [p for p in get_positions() if p["symbol"] not in NON_CC_SYMBOLS] \
+            if not dry_run else positions
 
     # ── Consolidation pass 1: sweep off-target-sector holdings ──────────────
     # The whitelist blocks new off-target buys; this sheds the legacy ones so

@@ -134,8 +134,18 @@ def rebalance_portfolio(
     target_positions: List[Position],
     equity: float,
     max_turnover_pct: float = 0.50,  # Max 50% portfolio turnover per rebalance
+    min_order_usd: float = 100.0,
+    min_drift_pct: float = 0.25,     # ignore drift smaller than this share of the position
 ) -> Dict[str, Dict]:
-    """Generate rebalance orders from current to target."""
+    """Generate rebalance orders from current to target.
+
+    `min_drift_pct` is what stops the churn. A flat $100 floor meant a $5,000
+    position drifting 2% produced a full round trip, and ISR recomputes its
+    target every 10-15 minutes — so tiny ranking wobbles were turning over the
+    book all day (2026-08-27: SH traded 8x, VFS 7x, $319k gross on a $72k
+    account, realized -$260). Requiring the gap to be a meaningful share of the
+    position before acting removes that.
+    """
     
     current = {k.upper(): v for k, v in current_positions.items()}
     target = {p.ticker.upper(): p for p in target_positions}
@@ -151,8 +161,13 @@ def rebalance_portfolio(
         tgt_val = tgt_pos.target_usd if tgt_pos else 0.0
         
         diff = tgt_val - cur_val
-        
-        if abs(diff) < 100:  # Min order size $100
+
+        # Absolute floor, plus a relative one for positions we already hold.
+        # Opening a new position or closing one entirely is never suppressed.
+        floor = min_order_usd
+        if cur_val > 0 and tgt_val > 0:
+            floor = max(floor, cur_val * min_drift_pct)
+        if abs(diff) < floor:
             continue
         
         side = "buy" if diff > 0 else "sell"

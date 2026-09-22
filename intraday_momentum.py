@@ -181,6 +181,23 @@ def flatten(state, dry_run=False, reason="EOD flatten"):
     return len(syms)
 
 
+def _regime_blocks_entries(cfg_section):
+    """True when the market is in a confirmed downtrend and this engine is gated.
+
+    A brake on ENTRY only — managing, trimming and exiting existing positions
+    continues normally. On 2026-08-17/18 every engine except swing_buyer traded
+    straight through the drawdown as if nothing had changed.
+    """
+    if not (cfg_section or {}).get("regime_gate", True):
+        return False, "unknown"
+    try:
+        import market_context
+        state = market_context.regime_state().get("state", "unknown")
+    except Exception:
+        return False, "unknown"
+    return state == "bear", state
+
+
 def run_tick(cfg, dry_run=False):
     if not cfg.get("intraday", {}).get("enabled", False):
         print("  intraday disabled in config — exiting.")
@@ -262,9 +279,13 @@ def run_tick(cfg, dry_run=False):
             held.pop(sym, None)
 
     # ── 3. Buy desired names we don't yet hold ───────────────────────────────
+    _blocked, _regime = _regime_blocks_entries(cfg.get("intraday"))
+    if _blocked:
+        print(f"  regime {_regime.upper()} — no new intraday entries "
+              f"(stops, rotations and the EOD flatten still run)")
     price_by_sym = {s: px for s, _, px in ranked}
     for sym in desired:
-        if sym in held:
+        if sym in held or _blocked:
             continue
         print(f"  {tag}↑ BUY {sym}  ${per_name:,.0f}")
         acts.append(f"🟢 BUY `{sym}` ${per_name:,.0f}")

@@ -39,6 +39,21 @@ CONFIG_FILE = HERE / "strategy_config.json"
 
 _DEFAULT_BASE = "https://paper-api.alpaca.markets/v2"
 
+
+def norm_base(url: str) -> str:
+    """Alpaca trading endpoints all live under /v2.
+
+    ALPACA_BASE_URL has been written both ways (with and without the suffix)
+    and every caller here does f"{base}/positions", so a base missing /v2
+    silently 404s — get_positions() then returns [] and get_account_equity()
+    returns None, which reads as "flat account" rather than "broken". Normalise
+    once, accept either form.
+    """
+    url = (url or "").rstrip("/")
+    if not url:
+        return ""
+    return url if url.endswith("/v2") else url + "/v2"
+
 # Fallback registry if strategy_config.json has no "wallets" block: the existing
 # single account, driven by the standard env vars.
 _FALLBACK = {
@@ -87,6 +102,7 @@ def missing_envs(name: str) -> list[str]:
     spec = _spec(name)
     if not spec:
         return ["<unknown wallet>"]
+
     out = []
     for field in ("key_env", "secret_env"):
         var = spec.get(field, "")
@@ -109,7 +125,7 @@ def resolve(name: str) -> tuple[str, str, str] | None:
     base = os.getenv(spec.get("base_env", ""), "") or _DEFAULT_BASE
     if not (key and secret):
         return None
-    return key, secret, base.rstrip("/")
+    return key, secret, norm_base(base)
 
 
 def list_wallets() -> list[dict]:
@@ -253,7 +269,7 @@ def add(name: str, key: str, secret: str) -> tuple[bool, str]:
         if os.getenv(var) or f"{var}=" in env_text:
             return False, f"{var} already set — pick a different wallet name"
 
-    base = (os.getenv("ALPACA_BASE_URL", "") or _DEFAULT_BASE).rstrip("/")
+    base = norm_base(os.getenv("ALPACA_BASE_URL", "") or _DEFAULT_BASE)
     acct = _probe_account(key, secret, base)
     if acct is None:
         return False, "Alpaca rejected the keys (or network error) — nothing saved"
@@ -312,6 +328,7 @@ def apply(name: str) -> tuple[bool, str]:
     """Rebind Alpaca credential globals across every holder module so all
     subsequent API calls target `name`. Returns (ok, message)."""
     global _current
+
     creds = resolve(name)
     if creds is None:
         miss = ", ".join(missing_envs(name))

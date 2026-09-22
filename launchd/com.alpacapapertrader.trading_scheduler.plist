@@ -4,7 +4,7 @@
 <dict>
   <key>Label</key><string>com.alpacapapertrader.trading_scheduler</string>
 
-  <!-- Heartbeat: every 10 min. trading_scheduler.py self-gates to ET market
+  <!-- Heartbeat: every 15 min. trading_scheduler.py self-gates to ET market
        hours and dispatches: exit engine (every manage_every_minutes), swing
        buyer (daily), disclosure copier (daily). NOTHING trades until the
        config switches are flipped: swing.enabled and/or
@@ -23,7 +23,7 @@
 
   <key>WorkingDirectory</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader</string>
 
-  <key>StartInterval</key><integer>600</integer>
+  <key>StartInterval</key><integer>900</integer>
 
   <key>StandardOutPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.out.log</string>
   <key>StandardErrorPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/trading_scheduler.err.log</string>

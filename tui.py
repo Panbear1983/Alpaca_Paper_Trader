@@ -1601,7 +1601,8 @@ class AlpacaTUI(App):
             t.add_columns(i18n.t("col.sym"), i18n.t("col.qty"), i18n.t("col.avg"),
                           i18n.t("col.price"), i18n.t("col.mkt_val"),
                           i18n.t("col.cost"), i18n.t("col.pl_usd"),
-                          i18n.t("col.pl_pct"))
+                          i18n.t("col.pl_pct"), i18n.t("col.day_pl_usd"),
+                          i18n.t("col.day_pl_pct"))
         else:
             t.add_columns(i18n.t("col.sym"), i18n.t("col.side"),
                           i18n.t("col.qty_usd"), i18n.t("col.status"),
@@ -2211,11 +2212,16 @@ class AlpacaTUI(App):
                 cost = _f(p.get("cost_basis"), qty * avg)       # 總成本 = total bought in
                 pl   = _f(p.get("unrealized_pl"))
                 plpc = _f(p.get("unrealized_plpc")) * 100
+                day_pl   = _f(p.get("unrealized_intraday_pl"))
+                day_plpc = _f(p.get("unrealized_intraday_plpc")) * 100
                 col  = "green" if pl >= 0 else "red"
+                day_col = "green" if day_pl >= 0 else "red"
                 t.add_row(
                     sym, f"{qty:g}", f"{avg:.2f}", f"{cur:.2f}",
                     f"{mv:,.0f}", f"{cost:,.0f}",
                     Text(f"{pl:+,.0f}", style=col), Text(f"{plpc:+.1f}%", style=col),
+                    Text(f"{day_pl:+,.0f}", style=day_col),
+                    Text(f"{day_plpc:+.1f}%", style=day_col),
                     key=sym,
                 )
                 self._syms.append(sym)

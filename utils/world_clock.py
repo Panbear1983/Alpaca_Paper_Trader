@@ -7,6 +7,33 @@ across all trading logic. Uses IANA time zone database via pytz.
 from datetime import datetime, time, timedelta
 import pytz
 from typing import Optional
+import time as _time_mod
+
+_CLOCK_CACHE: dict = {"t": 0.0, "data": None}
+_CLOCK_TTL = 20  # seconds — real enough for a UI badge/scheduler gate, gentle on Alpaca
+
+
+def _alpaca_clock() -> Optional[dict]:
+    """The real market clock (holiday-aware) from Alpaca's own /clock endpoint.
+
+    Returns None on any failure so callers can fall back rather than crash —
+    this runs inside tight polling loops (price_watcher) that must not die
+    over a transient network hiccup.
+    """
+    now = _time_mod.time()
+    if now - _CLOCK_CACHE["t"] < _CLOCK_TTL and _CLOCK_CACHE["data"] is not None:
+        return _CLOCK_CACHE["data"]
+    try:
+        import capitol_copier as cc
+        import requests
+        r = requests.get(f"{cc.BASE_URL}/clock", headers=cc.ALPACA_HEADERS, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        _CLOCK_CACHE["t"] = now
+        _CLOCK_CACHE["data"] = data
+        return data
+    except Exception:
+        return None
 
 
 class WorldClock:
@@ -49,24 +76,33 @@ class WorldClock:
     def is_market_open(self, dt: Optional[datetime] = None) -> bool:
         """
         Check if market is open at given time (defaults to now).
-        Market: Monday-Friday, 9:30-16:00 ET
+
+        Every caller in this codebase asks about "now", so the real Alpaca
+        clock (holiday-aware) is checked first and used whenever available.
+        The Mon-Fri/9:30-16:00 rule below only covers a transient API failure
+        — it does NOT know about market holidays, so it will say "open" on a
+        day like Labor Day even though the exchange is shut.
         """
+        live = _alpaca_clock()
+        if live is not None:
+            return bool(live.get("is_open"))
+
         if dt is None:
             dt = self.ny_time()
-        
+
         # Convert to NY time if needed
         if dt.tzinfo != self.ny:
             dt = dt.astimezone(self.ny)
-        
+
         # Check weekday (Monday=0, Friday=4)
         if dt.weekday() > 4:  # Saturday=5, Sunday=6
             return False
-        
+
         # Check time (9:30-16:00)
         market_open = time(9, 30)
         market_close = time(16, 0)
         current_time = dt.time()
-        
+
         return market_open <= current_time < market_close
     
     def time_to_open(self) -> Optional[float]:

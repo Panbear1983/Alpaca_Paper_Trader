@@ -96,7 +96,15 @@ def _run_wallet(name: str, state: dict, now: dt.datetime, today: str) -> list:
         print(f"{tag} no strategy file — skip")
         return []
 
-    capitol_on  = scfg.get("capitol_copier", {}).get("autorun_enabled", False)
+    # The exit engine (stops/trails/take-profits) and the disclosure copy loop
+    # used to share one flag. That is why the 5% stop was dark: turning it on
+    # would also have started politician copy-trading, so it stayed off — and
+    # eleven trades ran past -5% unprotected, one to -16%.
+    _cc = scfg.get("capitol_copier", {}) or {}
+    _legacy = _cc.get("autorun_enabled", False)
+    exits_on    = _cc.get("exits_on", _legacy)     # falls back to the old flag
+    copy_on     = _cc.get("copy_on",  _legacy)
+    capitol_on  = exits_on or copy_on              # for the early-exit check below
     swing_on    = scfg.get("swing", {}).get("enabled", False)
     intraday_on = scfg.get("intraday", {}).get("enabled", False)
     if not capitol_on and not swing_on and not intraday_on:
@@ -160,8 +168,12 @@ def _run_wallet(name: str, state: dict, now: dt.datetime, today: str) -> list:
         wst.setdefault('trading_halted', False)
         wst.setdefault('halt_logged_today', False)
 
+    # The halt gates every ENTRY engine below. Exits keep running — a halted
+    # day still needs its stops.
+    halted = bool(wst.get('trading_halted', False))
+
     # ── 1. Exit engine (high frequency) ────────────────────────────────────
-    if capitol_on:
+    if exits_on:
         every = int(ts.get("manage_every_minutes", 20))
         last  = wst.get("last_manage_at")
         due   = True
@@ -183,7 +195,7 @@ def _run_wallet(name: str, state: dict, now: dt.datetime, today: str) -> list:
 
     # ── 2. Swing buyer (daily) ──────────────────────────────────────────────
     win = int(ts.get("window_minutes", 20))
-    if swing_on and wst.get("last_swing_date") != today and \
+    if swing_on and not halted and wst.get("last_swing_date") != today and \
             _in_window(now, ts.get("swing_time_et", "10:00"), win):
         print(f"{tag} {now:%H:%M ET} → swing buyer (daily)")
         import swing_buyer
@@ -195,7 +207,7 @@ def _run_wallet(name: str, state: dict, now: dt.datetime, today: str) -> list:
             print(f"{tag} swing error: {e}", file=sys.stderr)
 
     # ── 3. Disclosure copy loop (daily) ─────────────────────────────────────
-    if capitol_on and wst.get("last_copy_date") != today and \
+    if copy_on and not halted and wst.get("last_copy_date") != today and \
             _in_window(now, ts.get("copy_time_et", "10:30"), win):
         print(f"{tag} {now:%H:%M ET} → capitol copy loop (daily)")
         import capitol_copier as cc
@@ -206,7 +218,11 @@ def _run_wallet(name: str, state: dict, now: dt.datetime, today: str) -> list:
         except Exception as e:
             print(f"{tag} copy error: {e}", file=sys.stderr)
 
-    # ── 4. Intraday momentum (high frequency) ────────────────────────────────\n    if intraday_on and not wst.get('trading_halted', False):
+    # ── 4. Intraday momentum (high frequency) ────────────────────────────────
+    # 2026-08-30: this guard used to be swallowed by a literal '\n' inside the
+    # comment above it, so the block ran unconditionally and the daily-loss
+    # halt gated nothing.
+    if intraday_on and not halted:
         every = int(ts.get("intraday_every_minutes", 10))
         last  = wst.get("last_intraday_at")
         due   = True
@@ -230,7 +246,7 @@ def _run_wallet(name: str, state: dict, now: dt.datetime, today: str) -> list:
 
     # ── 5. ISR Alpha (high frequency) ──────────────────────────────────────────
     isr_on = scfg.get("isr_alpha", {}).get("enabled", False)
-    if isr_on:
+    if isr_on and not halted:
         every = int(ts.get("isr_every_minutes", 15))
         last  = wst.get("last_isr_at")
         due   = True

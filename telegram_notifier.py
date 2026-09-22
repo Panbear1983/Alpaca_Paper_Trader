@@ -108,6 +108,28 @@ def send_photo(path, caption="", channel=None):
         return False
 
 
+def send_voice(path, caption="", channel=None):
+    """Send a voice note via sendVoice. Telegram requires OGG/Opus here; an
+    mp3 or m4a is rejected, so callers must encode before calling."""
+    token, chat = _resolve(channel)
+    if not (token and chat):
+        return False
+    try:
+        with open(path, "rb") as fh:
+            r = requests.post(
+                f"{API_BASE}/bot{token}/sendVoice",
+                data={"chat_id": chat, "caption": caption[:1024]},
+                files={"voice": fh},
+                timeout=60,
+            )
+        if r.status_code != 200:
+            print(f"[telegram] sendVoice {r.status_code}: {r.text[:180]}")
+        return r.status_code == 200
+    except Exception as e:
+        print(f"[telegram] send_voice failed: {e}")
+        return False
+
+
 # ── Formatted message helpers ────────────────────────────────────────────────
 
 def notify_batch(title, lines, emoji="📊"):

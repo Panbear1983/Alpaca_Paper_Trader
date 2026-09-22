@@ -23,7 +23,12 @@ load_dotenv()
 
 API_KEY    = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL   = os.getenv("ALPACA_BASE_URL")
+# Alpaca trading endpoints all live under /v2. ALPACA_BASE_URL has been
+# written both ways; a base missing the suffix 404s on every request and
+# the error handling here reads that as "nothing found" rather than
+# "broken". Normalise through the one shared helper.
+from wallets import norm_base as _norm_base
+BASE_URL   = _norm_base(os.getenv("ALPACA_BASE_URL", ""))
 DATA_URL   = "https://data.alpaca.markets/v2"
 
 ALPACA_HEADERS = {

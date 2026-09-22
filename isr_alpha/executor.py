@@ -89,6 +89,48 @@ def get_current_positions_usd() -> Dict[str, float]:
     return result
 
 
+def other_engine_tickers() -> set:
+    """Tickers owned by OTHER engines — ISR must never liquidate these.
+
+    ISR sizes a target book from its own ranking and rebalance_portfolio()
+    assigns target 0 to anything not in that book. Without this guard it sells
+    whatever swing_buyer, intraday_momentum or the inverse hedge just bought
+    (observed 2026-08-24 and 2026-08-26: swing bought MPC/MRK/MRNA/PSX at
+    09:35, ISR sold all four at 09:47).
+    """
+    owned = set()
+    for fname, key in ((".swing_state.json", "entries"),
+                       (".intraday_state.json", "entries")):
+        try:
+            with open(strategies.state_path(fname)) as f:
+                owned.update(k.upper() for k in (json.load(f).get(key) or {}))
+        except Exception:
+            pass
+    try:
+        import inverse_hedge
+        owned.add(str(inverse_hedge.INVERSE_ETF).upper())
+    except Exception:
+        pass
+    return owned
+
+
+def _regime_blocks_entries(cfg_section):
+    """True when the market is in a confirmed downtrend and this engine is gated.
+
+    A brake on ENTRY only — managing, trimming and exiting existing positions
+    continues normally. On 2026-08-17/18 every engine except swing_buyer traded
+    straight through the drawdown as if nothing had changed.
+    """
+    if not (cfg_section or {}).get("regime_gate", True):
+        return False, "unknown"
+    try:
+        import market_context
+        state = market_context.regime_state().get("state", "unknown")
+    except Exception:
+        return False, "unknown"
+    return state == "bear", state
+
+
 def run_rebalance(cfg: dict, dry_run: bool = False) -> List[dict]:
     """Run portfolio rebalance based on ISR signals."""
     isr_cfg = get_isr_config(cfg)
@@ -120,8 +162,19 @@ def run_rebalance(cfg: dict, dry_run: bool = False) -> List[dict]:
         max_gross_leverage=isr_cfg.get("max_gross_leverage", 1.5),
     )
     
-    # Get current positions
+    # Get current positions, minus anything another engine owns. ISR only
+    # manages its own sleeve — see other_engine_tickers().
     current = get_current_positions_usd()
+    _foreign = other_engine_tickers()
+    if _foreign:
+        _skip = sorted(set(current) & _foreign)
+        if _skip:
+            print(f"  \u270b Not ISR's book, leaving alone: {', '.join(_skip)}")
+        # Drop from BOTH sides. Removing only from `current` would make a
+        # foreign-owned ticker look unheld and ISR would buy a second lot.
+        current = {k: v for k, v in current.items() if k not in _foreign}
+        target_positions = [p for p in target_positions
+                            if p.ticker.upper() not in _foreign]
     
     # PROTECTION: Don't sell moat compounders (moat_score >= 7) unless stop loss hit
     protected = {p.ticker for p in target_positions if p.moat_score >= 7.0}
@@ -137,14 +190,45 @@ def run_rebalance(cfg: dict, dry_run: bool = False) -> List[dict]:
                 protected.discard(ticker)
                 print(f"  ⚠️  Stop hit on protected {ticker}: {(cur/entry-1)*100:.1f}%")
     
+    # Rank hysteresis — enter on top_n, exit only when a name falls out of
+    # exit_rank. Without it a holding that slips from rank 20 to 21 is sold in
+    # full and often bought back minutes later. Same pattern the swing
+    # backtester documents (backtest_swing.py:12).
+    _max_pos = isr_cfg.get("max_positions", 15)
+    _exit_rank = int(isr_cfg.get("exit_rank", _max_pos * 2))
+    _still_ok = {c.ticker.upper() for c in ranked[:_exit_rank]}
+    _tgt_syms = {p.ticker.upper() for p in target_positions}
+    for _sym, _val in current.items():
+        if _sym not in _tgt_syms and _sym in _still_ok and _val > 0:
+            # Hold at its current size: target == current means no order.
+            target_positions = target_positions + [
+                portfolio.Position(ticker=_sym, company_name=_sym, target_usd=_val,
+                                   signal_score=0.0, catalyst_density=0.0,
+                                   moat_score=0.0, sub_sector="", tier="",
+                                   engine="hold")]
+            print(f"  \u23f8  Holding {_sym} — still inside top {_exit_rank}")
+
     # Generate rebalance orders
     orders = portfolio.rebalance_portfolio(
         current,
         target_positions,
         equity=equity,
         max_turnover_pct=isr_cfg.get("max_turnover_pct", 0.50),
+        min_order_usd=isr_cfg.get("min_order_usd", 100.0),
+        min_drift_pct=isr_cfg.get("min_drift_pct", 0.25),
     )
     
+    # REGIME: in a confirmed downtrend, open nothing new. Adds to existing
+    # holdings and every sell still go through — this brakes entry, not exit.
+    _blocked, _regime = _regime_blocks_entries(isr_cfg)
+    if _blocked:
+        _dropped = [t_ for t_, o in orders.items()
+                    if o["side"] == "buy" and current.get(t_, 0) <= 0]
+        for t_ in _dropped:
+            orders.pop(t_, None)
+        print(f"  \U0001f6d1 regime {_regime.upper()} — blocked {len(_dropped)} new entries"
+              + (f": {', '.join(sorted(_dropped))}" if _dropped else ""))
+
     # FILTER: Remove sell orders for protected positions
     filtered_orders = {}
     for ticker, order in orders.items():
