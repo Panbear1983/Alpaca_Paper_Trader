@@ -1,7 +1,7 @@
 {
-  "version": 4,
-  "last_updated": "2026-08-17",
-  "updated_by": "aggressive_mode",
+  "version": 8,
+  "last_updated": "2026-09-04",
+  "updated_by": "claude: Peter added SPCX to the anchor (buy) universe 2026-09-04, by explicit instruction",
   "tui": {
     "telegram_notify": true,
     "language": "en"
@@ -10,8 +10,8 @@
     "default_channel": "home",
     "channels": {
       "home": {
-        "token_env": "TELEGRAM_BOT_TOKEN",
-        "chat_env": "TELEGRAM_CHAT_ID"
+        "token_env": "PANBEAR_TELEGRAM_BOT_TOKEN",
+        "chat_env": "PANBEAR_TELEGRAM_CHAT_ID"
       }
     }
   },
@@ -57,32 +57,120 @@
         0.6
       ]
     ],
-    "pyramid_levels": [
-      0.15,
-      0.3
-    ],
+    "pyramid_levels": [],
     "pyramid_add_frac": 0.6,
     "prune_off_target": false,
-    "max_holdings": 15
+    "max_holdings": 20
   },
   "intraday": {
-    "enabled": true,
+    "enabled": false,
     "universe": [
-      "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AVGO", "ADBE", "CRM",
-      "ORCL", "INTC", "AMD", "QCOM", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MU",
-      "JPM", "BAC", "WFC", "C", "GS", "MS", "AXP", "V", "MA", "PYPL",
-      "JNJ", "PFE", "UNH", "ABT", "TMO", "DHR", "BMY", "AMGN", "GILD", "ABBV",
-      "PG", "KO", "PEP", "WMT", "COST", "HD", "MCD", "NKE", "SBUX", "LOW",
-      "CAT", "HON", "UPS", "RTX", "LMT", "DE", "MM", "GE", "F", "GM",
-      "XOM", "CVX", "COP", "EOG", "SLB", "PSX", "VLO", "MPC",
-      "NEE", "DUK", "SO", "D", "AEP", "EXC", "ES", "FE", "ETR",
-      "PLD", "PSA", "EQIX", "O", "AVB", "EQR", "ESS", "MAA",
-      "LLY", "NVO", "VRTX", "MRK", "REGN", "BAX", "ZTS", "BIIB", "MRNA", "ROK", "TER", "ISRG", "SYK", "GSAT"
+      "AAPL",
+      "ALM",
+      "MSFT",
+      "GOOGL",
+      "AMZN",
+      "META",
+      "TSLA",
+      "NVDA",
+      "AVGO",
+      "ADBE",
+      "CRM",
+      "ORCL",
+      "INTC",
+      "AMD",
+      "QCOM",
+      "TSM",
+      "ASML",
+      "AMAT",
+      "LRCX",
+      "KLAC",
+      "MU",
+      "JPM",
+      "BAC",
+      "WFC",
+      "C",
+      "GS",
+      "MS",
+      "AXP",
+      "V",
+      "MA",
+      "PYPL",
+      "JNJ",
+      "PFE",
+      "UNH",
+      "ABT",
+      "TMO",
+      "DHR",
+      "BMY",
+      "AMGN",
+      "GILD",
+      "ABBV",
+      "PG",
+      "KO",
+      "PEP",
+      "WMT",
+      "COST",
+      "HD",
+      "MCD",
+      "NKE",
+      "SBUX",
+      "LOW",
+      "CAT",
+      "HON",
+      "UPS",
+      "RTX",
+      "LMT",
+      "DE",
+      "MM",
+      "GE",
+      "F",
+      "GM",
+      "XOM",
+      "CVX",
+      "COP",
+      "EOG",
+      "SLB",
+      "PSX",
+      "VLO",
+      "MPC",
+      "NEE",
+      "DUK",
+      "SO",
+      "D",
+      "AEP",
+      "EXC",
+      "ES",
+      "FE",
+      "ETR",
+      "PLD",
+      "PSA",
+      "EQIX",
+      "O",
+      "AVB",
+      "EQR",
+      "ESS",
+      "MAA",
+      "LLY",
+      "NVO",
+      "VRTX",
+      "MRK",
+      "REGN",
+      "BAX",
+      "ZTS",
+      "BIIB",
+      "MRNA",
+      "ROK",
+      "TER",
+      "ISRG",
+      "SYK",
+      "GSAT"
     ],
     "top_n": 20,
-    "gross_mult": 4.0,
+    "gross_mult": 2.0,
     "stop_pct": 0.025,
-    "flatten_minutes": 3
+    "flatten_minutes": 3,
+    "regime_gate": true
   },
   "scoring_weights": {
     "realized_return_alpha": 0.35,
@@ -139,7 +227,9 @@
       "defense"
     ],
     "sentiment_veto_enabled": false,
-    "autorun_enabled": false
+    "autorun_enabled": false,
+    "exits_on": true,
+    "copy_on": true
   },
   "pool": {
     "max_size": 5,
@@ -164,18 +254,75 @@
     }
   },
   "isr_alpha": {
-    "enabled": true,
+    "enabled": false,
     "rebalance_every_minutes": 10,
     "catalyst_check_every_minutes": 3,
     "max_positions": 20,
     "max_sector_pct": 0.4,
-    "max_gross_leverage": 2.5,
-    "base_position_usd": 7500,
+    "max_gross_leverage": 2.0,
+    "base_position_usd": 12500,
     "max_position_pct": 0.25,
-    "max_turnover_pct": 0.8,
+    "max_turnover_pct": 0.2,
     "catalyst_threshold": 0.4,
     "moat_threshold": 7.0,
     "capex_threshold": 0.7,
-    "min_composite_for_entry": 0.3
+    "min_composite_for_entry": 0.3,
+    "min_drift_pct": 0.25,
+    "exit_rank": 30,
+    "regime_gate": true
+  },
+  "risk": {
+    "max_position_pct": 1.0,
+    "max_gross_exposure": 2.0,
+    "gross_by_regime": {
+      "bull": 1.5,
+      "neutral": 1.25,
+      "bear": 0.75
+    },
+    "hedge_by_regime": {
+      "bull": 0.0,
+      "neutral": 0.05,
+      "bear": 0.15
+    }
+  },
+  "hedge": {
+    "regime_state": "bull",
+    "regime_checked_at": "2026-08-29T03:45:36"
+  },
+  "anchor": {
+    "enabled": true,
+    "universe": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "JPM",
+      "CAT",
+      "GOOGL",
+      "V",
+      "HOOD",
+      "ALM",
+      "TSLA",
+      "SPCX",
+      "SKHY",
+      "MRVL",
+      "AVGO",
+      "AMD"
+    ],
+    "entry_window_et": [
+      "09:30",
+      "11:30"
+    ],
+    "max_entries_per_name_per_day": 2,
+    "max_entries_per_day": 0,
+    "position_pct": 1.0,
+    "max_stop_pct": 0.05,
+    "breakeven_at_r": 1.0,
+    "partial_take_at_r": 2.0,
+    "partial_take_frac": 0.5,
+    "trail_bars": 3,
+    "consecutive_loss_halt": 2,
+    "daily_loss_limit_pct": 3.0,
+    "min_confirm_volume": 200000,
+    "swing_lookback_sessions": 10
   }
 }

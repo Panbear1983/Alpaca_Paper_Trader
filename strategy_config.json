@@ -45,5 +45,9 @@
   "dynamic_exits": {
     "trail_trigger_pct": 0.5,
     "trail_giveback_pct": 0.15
+  },
+  "risk": {
+    "max_position_pct": 0.25,
+    "max_gross_exposure": 2.0
   }
 }

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.alpacapapertrader.wb_daily_report</string>
+
+  <!-- Wanna Buffet's High Risk daily report + voice note.
+       Fires 09:00 Taipei, which is 21:00 ET the previous day — five hours
+       after the 16:00 ET close, so the session is settled. Weekdays here are
+       TAIPEI days: Tue-Sat local == Mon-Fri ET sessions.
+       Noon is a retry, not a second report: the once flag skips any session
+       already delivered, so a successful 09:00 run makes the 12:00 run a no-op. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/venv/bin/python</string>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/wb_daily_report.py</string>
+    <string>--once</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/wb_daily_report.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/wb_daily_report.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- ffmpeg lives in /opt/homebrew/bin and launchd does not inherit it. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>ALPACA_ANALYST_TIMEOUT</key><string>240</string>
+    <!-- Authorises the push. Without it wb_daily_report.py builds the report
+         but refuses to deliver, so an agent run cannot message Peter. -->
+    <key>WB_REPORT_SCHEDULED</key><string>1</string>
+  </dict>
+
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

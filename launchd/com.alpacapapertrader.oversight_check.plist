@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.alpacapapertrader.oversight_check</string>
+
+  <!-- Close-of-day threshold check. 04:15 Taipei is 16:15 ET, fifteen minutes
+       after the bell so the session figures have settled.
+
+       Weekdays here are TAIPEI days: Tue-Sat local maps to Mon-Fri ET sessions.
+
+       This stage runs no model. It is pure arithmetic and stays SILENT unless a
+       threshold breaks, so a normal day produces no 4am notification. The full
+       evaluation happens later, folded into the 09:00 report. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/venv/bin/python</string>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/oversight.py</string>
+    <string>check</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>15</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/oversight_check.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/oversight_check.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+  </dict>
+
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.alpacapapertrader.price_watcher</string>
+
+  <!-- The 5% stop / 20% re-entry watcher. Written 2026-08-18, never scheduled
+       until now, which is why eleven trades ran past -5% unprotected.
+
+       This is a DAEMON, not a scheduled job: price_watcher.py runs a while-True
+       loop, gates itself on market hours, and polls every 30 seconds. So it
+       wants RunAtLoad plus KeepAlive, not a calendar interval.
+
+       It is the independent backstop to the exit engine in trading_scheduler
+       (capitol_copier.exits_on). Two things watching the stops, not one. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/venv/bin/python</string>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/price_watcher.py</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader</string>
+
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+
+  <key>StandardOutPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/price_watcher.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/price_watcher.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Without this Python buffers stdout when not attached to a terminal and
+         the log stays empty for hours, which looks identical to a dead daemon. -->
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+  </dict>
+</dict>
+</plist>
