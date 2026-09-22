@@ -21,6 +21,9 @@ backtest_cache.json
 
 # report output — keep .md reports, exclude binaries and logs
 reports/*.png
+reports/*.ogg
+reports/*.aiff
+reports/*.mp3
 reports/*.log
 reports/cron.log
 
@@ -37,6 +40,10 @@ proposals/
 .swing_state*.json
 .intraday_state*.json
 .isr_alpha_state*.json
+.sector_cache.json
+
+# Wanna Buffet trading diary — live wallet state, same policy as above
+diary/
 .trading_schedule_state*.json
 .event_watcher_state.json
 .event_watcher.lock
@@ -53,3 +60,15 @@ logs/
 reports/*.md
 *.bak_pre_split
 *.backup
+
+# editor/agent backup copies — never commit (many *.backupN / .bak / .fixed piled up in Aug 2026)
+*.backup*
+*.bak
+*.bak?
+*.orig
+*.fixed
+*.before_*
+
+# more runtime state
+.regime_cache.json
+positions.json
