@@ -225,7 +225,7 @@ def check_alpaca_fills(state):
         qty   = o.get("filled_qty", o.get("qty", "?"))
         price = o.get("filled_avg_price", "?")
 
-        if otype == "stop" and side == "sell":
+        if otype in ("stop", "trailing_stop") and side == "sell":
             fill_lines.append(f"🛑 STOP SELL `{sym}` {qty} @ ${price}")
         else:
             emoji = "🟢" if side == "buy" else "🔴"

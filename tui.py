@@ -2355,8 +2355,11 @@ class AlpacaTUI(App):
 
     @work(thread=True, group="action")
     def _do_cancel_all_orders(self) -> None:
-        count = hr.cancel_all_orders()
+        # Never strips the broker-side trailing-stop guards (broker_stops.py).
+        count, kept = hr.cancel_all_orders_keep_guards()
         self.call_from_thread(self._log, t("log.cancel_all", n=count))
+        if kept:
+            self.call_from_thread(self._log, t("log.cancel_all_kept", n=kept))
         self.call_from_thread(self.refresh_data)
 
     # ── read-only dry-run ──────────────────────────────────────────────────--

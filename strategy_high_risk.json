@@ -1,7 +1,7 @@
 {
   "version": 8,
-  "last_updated": "2026-09-04",
-  "updated_by": "claude: Peter added SPCX to the anchor (buy) universe 2026-09-04, by explicit instruction",
+  "last_updated": "2026-09-22",
+  "updated_by": "claude: broker-side trailing-stop guards ON for High Risk (Step 2), 2026-09-22",
   "tui": {
     "telegram_notify": true,
     "language": "en"
@@ -323,6 +323,10 @@
     "consecutive_loss_halt": 2,
     "daily_loss_limit_pct": 3.0,
     "min_confirm_volume": 200000,
-    "swing_lookback_sessions": 10
+    "swing_lookback_sessions": 10,
+    "core_holds": [
+      "NVDA"
+    ],
+    "broker_stops": true
   }
 }

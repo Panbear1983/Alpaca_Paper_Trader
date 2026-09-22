@@ -241,6 +241,9 @@ _TABLE: dict[str, tuple[str, str]] = {
                      "[yellow]{sym} 已取消核心持股 — 恢復一般規則[/]"),
     "log.core_nosel": ("[dim]select a holding in the positions view first (C marks it core)[/]",
                        "[dim]請先在持倉檢視中選取一檔（按 C 設為核心持股）[/]"),
+    "log.cancel_all_kept": ("[green]kept {n} protective stop(s) at the broker — they are not "
+                            "ordinary orders[/]",
+                            "[green]保留了 {n} 筆券商端保護性停損單 — 它們不是一般掛單[/]"),
 
     # ── manual modal ──────────────────────────────────────────────────────────
     "man.hint": (

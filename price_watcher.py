@@ -85,6 +85,38 @@ def get_current_price(symbol):
     except Exception:
         return 0.0
 
+# ── Broker-side guards (broker_stops.py) ──────────────────────────────────────
+
+_GUARD_LAST = {"t": 0.0}
+
+
+def _reconcile_guards(every_s: float = 0.0) -> None:
+    """Call broker_stops.reconcile(); swallow everything. `every_s` adds a
+    coarser interval for the market-closed branch."""
+    if every_s and time.time() - _GUARD_LAST["t"] < every_s:
+        return
+    _GUARD_LAST["t"] = time.time()
+    try:
+        import broker_stops
+        for row in broker_stops.reconcile():
+            print(f"[stops] {row.get('sym')} {row.get('action')} {row.get('reason','')} "
+                  f"{row.get('result') or row.get('error') or ''}")
+    except Exception as e:
+        print(f"[stops] reconcile failed: {e}")
+
+
+def _stop_frac(symbol: str) -> float:
+    """Stop distance as a fraction: the per-name guard width on a boxed
+    wallet, STOP_LOSS_PCT (5%) everywhere else."""
+    try:
+        import broker_stops
+        if broker_stops.enabled():
+            return broker_stops.width_pct(symbol) / 100.0
+    except Exception:
+        pass
+    return STOP_LOSS_PCT
+
+
 # ── Anchor plan manager ───────────────────────────────────────────────────────
 
 _ANCHOR_CFG = {"t": 0.0, "cfg": {}}
@@ -293,6 +325,9 @@ def main():
     while True:
         if not is_market_open():
             print(f"[watcher] Market closed. Sleeping {CHECK_INTERVAL}s...")
+            # GTC guards can be armed while the market is shut, so a position
+            # opened late in a session is protected before the next open.
+            _reconcile_guards(every_s=600)
             time.sleep(CHECK_INTERVAL)
             continue
         
@@ -323,9 +358,12 @@ def main():
                     continue
                 
                 pnl_pct = (current_price - avg_entry) / avg_entry
-                if pnl_pct <= -STOP_LOSS_PCT:
+                # Boxed wallet: same per-name width as the broker guard, which
+                # normally fires first; this is the backstop. Elsewhere: 5%.
+                stop_frac = _stop_frac(symbol)
+                if pnl_pct <= -stop_frac:
                     # Trigger stop loss: sell all
-                    print(f"[watcher] STOP LOSS: {symbol} @ {current_price:.2f} (entry {avg_entry:.2f}) -> {pnl_pct*100:.2f}% -> SELL ALL {qty}")
+                    print(f"[watcher] STOP LOSS: {symbol} @ {current_price:.2f} (entry {avg_entry:.2f}) -> {pnl_pct*100:.2f}% <= -{stop_frac*100:.1f}% -> SELL ALL {qty}")
                     try:
                         res = place_market_order(symbol, 'sell', qty=qty)
                         if res.get('id'):
@@ -348,6 +386,11 @@ def main():
                 if symbol in pos_map:
                     continue  # already have position
                 entry_info = state.get(symbol, {})
+                # Bookkeeping keys ("_anchor_open_n" etc.) share this dict. One
+                # of them is an int; .get() on it crashed every loop for weeks
+                # (8,356 log lines) and nothing below this line ever ran.
+                if symbol.startswith("_") or not isinstance(entry_info, dict):
+                    continue
                 # Only re-enter names OUR stop-loss sold. Without this we would also
                 # buy back anything another engine deliberately exited.
                 if not entry_info.get('stop_loss_sold'):
@@ -395,12 +438,20 @@ def main():
             except Exception as e:
                 print(f"[anchor] error: {e}")
 
-            # Save state after each loop
-            save_state(state)
-            
+            # Broker-side guards: make the resting trailing stops match the
+            # book (boxed wallets only; rate-limits itself; never raises).
+            _reconcile_guards()
+
         except Exception as e:
             print(f"[watcher] Unexpected error in main loop: {e}")
-        
+        finally:
+            # Save state after each loop — in a finally so an exception above
+            # can never skip it again.
+            try:
+                save_state(state)
+            except Exception as e:
+                print(f"[watcher] could not save state: {e}")
+
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == '__main__':

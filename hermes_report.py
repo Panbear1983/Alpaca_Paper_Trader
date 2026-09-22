@@ -48,6 +48,11 @@ ALPACA_KEY    = os.environ["ALPACA_API_KEY"]
 ALPACA_SECRET = os.environ["ALPACA_SECRET_KEY"]
 ALPACA_BASE   = os.environ.get("ALPACA_BASE_URL",
                                "https://paper-api.alpaca.markets/v2").rstrip("/")
+# Every endpoint below lives under /v2. The env var has been written both with
+# and without the suffix; wallets.apply() normalises it for the TUI, but any
+# script importing this module standalone silently 404'd (2026-09-22).
+if not ALPACA_BASE.endswith("/v2"):
+    ALPACA_BASE += "/v2"
 ALPACA_DATA   = "https://data.alpaca.markets/v2"
 TG_TOKEN      = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT       = os.environ.get("TELEGRAM_HOME_CHANNEL", "")
@@ -176,6 +181,25 @@ def cancel_all_orders() -> int:
         return 0
     except Exception:
         return 0
+
+
+def cancel_all_orders_keep_guards() -> tuple[int, int]:
+    """Cancel every open order EXCEPT the resting trailing-stop guards that
+    broker_stops.py keeps on a boxed wallet. Returns (cancelled, kept).
+
+    The TUI's 'X' used to be an account-wide DELETE /orders, which would have
+    stripped every protective stop in one keypress. Guards are recognised by
+    their client_order_id head; anything else is cancelled one by one.
+    """
+    kept = cancelled = 0
+    for o in fetch_open_orders():
+        cid = str(o.get("client_order_id") or "")
+        if o.get("type") == "trailing_stop" and o.get("side") == "sell" and cid.startswith("pstop-"):
+            kept += 1
+            continue
+        if cancel_order(str(o.get("id"))):
+            cancelled += 1
+    return cancelled, kept
 
 
 def fetch_portfolio_history(period: str = "1M", timeframe: str = "1D") -> dict:

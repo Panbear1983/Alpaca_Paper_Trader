@@ -360,6 +360,7 @@ SOURCE_BY_MODULE = {
     "anchor_trade":          "anchor",
     "tui":                   "manual",
     "manual_trade":          "manual",
+    "broker_stops":          "pstop",      # resting trailing-stop guards at the broker
 }
 KNOWN_SOURCES = set(SOURCE_BY_MODULE.values()) | {"other"}
 
@@ -462,6 +463,23 @@ def place_market_order(ticker, side, notional=None, qty=None):
             _log_guardrail(ticker, side, notional, qty, which, why)
             return {"blocked_by_cap": True, "reason": why, "symbol": ticker}
     source = _caller_source()
+    # Boxed wallets keep a resting trailing-stop guard on every position
+    # (broker_stops.py). Alpaca refuses a sell while those shares are held by
+    # the guard, so every sell — engine, stop, trim, manual — releases it first.
+    # The reconciler re-arms whatever remains within a minute. Done here, not
+    # in a wrapper: _caller_source() above must keep its frame depth.
+    if str(side).lower() == "sell":
+        try:
+            import broker_stops
+            if broker_stops.enabled():
+                broker_stops.release(ticker)
+                if qty:
+                    pos = get_position(ticker) or {}
+                    avail = abs(float(pos.get("qty_available") or 0))
+                    if avail and float(qty) > avail:
+                        qty = round(avail, 4)
+        except Exception as e:
+            print(f"[stops] release-before-sell failed for {ticker}: {e}")
     payload = {
         "symbol":          ticker,
         "side":            side,
@@ -546,6 +564,39 @@ def core_holds():
         return set()
 
 
+def _sellable_qty(p):
+    """Shares a software sell may ask for.
+
+    Normally qty_available (Alpaca rejects a sell above it while an open order
+    exists). On a boxed wallet the resting guard holds almost every share, so
+    qty_available would be the fractional remainder and a cap trim could never
+    complete — there the whole position counts, because place_market_order
+    releases the guard before it sells.
+    """
+    q  = abs(float(p.get("qty", 0) or 0))
+    qa = abs(float(p.get("qty_available", q) or 0))
+    try:
+        import broker_stops
+        if broker_stops.enabled():
+            return q
+    except Exception:
+        pass
+    return qa
+
+
+def _stop_frac(sym, configured):
+    """Stop-loss distance for `sym` as a fraction: the per-name guard width on
+    a boxed wallet (so the software backstop agrees with the broker guard),
+    the configured dynamic_exits.stop_loss_pct everywhere else."""
+    try:
+        import broker_stops
+        if broker_stops.enabled():
+            return broker_stops.width_pct(sym) / 100.0
+    except Exception:
+        pass
+    return configured
+
+
 def _trim_to_caps(positions, equity, dry_run, acts):
     """Sell down over-cap holdings. Returns the number of sell orders sent.
 
@@ -566,7 +617,7 @@ def _trim_to_caps(positions, equity, dry_run, acts):
         sym = p["symbol"]
         mv  = abs(float(p.get("market_value", 0) or 0))
         px  = float(p.get("current_price", 0) or 0)
-        avail = abs(float(p.get("qty_available", p.get("qty", 0)) or 0))
+        avail = _sellable_qty(p)
         book[sym] = {"mv": mv, "px": px, "avail": avail}
         if px <= 0 or avail <= 0:
             continue
@@ -730,9 +781,12 @@ def manage_open_positions(cfg, dry_run=False):
         peak      = st["peak_price"]
         peak_gain = (peak - entry) / entry if entry else 0.0
 
-        # 1. Stop-loss
-        if plpc <= -stop_loss:
-            print(f"  {tag}✗ STOP-LOSS {sym}  {plpc*100:+.1f}% <= -{stop_loss*100:.0f}%  → sell all {qty:g}")
+        # 1. Stop-loss. On a boxed wallet the broker guard normally fires
+        #    first; this is the backstop for the fractional remainder and for
+        #    any name whose guard is missing, at the same per-name width.
+        stop_here = _stop_frac(sym, stop_loss)
+        if plpc <= -stop_here:
+            print(f"  {tag}✗ STOP-LOSS {sym}  {plpc*100:+.1f}% <= -{stop_here*100:.1f}%  → sell all {qty:g}")
             acts.append(f"🛑 STOP `{sym}` {plpc*100:+.1f}%")
             if not dry_run:
                 place_market_order(sym, "sell", qty=qty)
