@@ -123,7 +123,10 @@ def rs_rank(bars_by_sym, universe, lookback):
 
 # ── Core run ─────────────────────────────────────────────────────────────────
 
-def run(dry_run=False, force=False):
+def run(dry_run=False, force=False, preview=False):
+    """Returns the idea rows of this run (empty in trade mode). `preview`
+    (2026-09-23): the advice path with nothing written — rows are built, not
+    recorded, and the fence is judged as if inside the window."""
     import urllib3
     urllib3.disable_warnings()
 
@@ -131,11 +134,20 @@ def run(dry_run=False, force=False):
     sw  = cfg.get("swing", {})
     import suggestions
     mode = suggestions.mode_for(sw, "mode", "enabled")      # trade | notify | off
+    if preview:
+        mode, dry_run, force = "notify", True, True
     if mode == "off" and not (dry_run or force):
         print("  swing buyer disabled in config (swing.enabled=false / mode off) — exiting.")
-        return
+        return []
     notify = (mode == "notify")                              # advice only: ideas, never orders
     ideas = []
+    def idea(sym, usd, reason):
+        if preview:
+            ok, why = suggestions.preview_fence(sym, "buy", usd)
+            return suggestions.build_row("swing", sym, "buy", usd, reason, ok, why)
+        ok, why = suggestions.fence_check(sym, "buy", usd)
+        return suggestions.record("swing", sym, "buy", usd, reason, ok, why)
+    run.ranking = []                                          # filled below, read by --preview
 
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     tag = "[DRY] " if dry_run else ("[IDEA] " if notify else "")
@@ -177,14 +189,14 @@ def run(dry_run=False, force=False):
         state["last_run_date"] = today
         if not dry_run:
             save_state(state)
-        return
+        return ideas
 
     if budget < 500:
         print("  budget < $500 — nothing to deploy this run.")
         state["last_run_date"] = today
         if not dry_run:
             save_state(state)
-        return
+        return ideas
 
     ranked, spy20 = rs_rank(bars, universe, sw.get("rs_lookback_days", 20))
     rs_by_sym = dict(ranked)
@@ -235,10 +247,8 @@ def run(dry_run=False, force=False):
                   f"→ add ${dip_usd:,.0f}")
             acts.append(f"🔵 DIP-ADD `{sym}` ${dip_usd:,.0f} ({off_peak*100:.1f}% off peak)")
             if notify:
-                if not dry_run:
-                    ok, why = suggestions.fence_check(sym, "buy", dip_usd)
-                    ideas.append(suggestions.record("swing", sym, "buy", dip_usd,
-                                 f"dip-add: peak +{peak_gain*100:.0f}%, {off_peak*100:.1f}% off peak", ok, why))
+                if preview or not dry_run:
+                    ideas.append(idea(sym, dip_usd, f"dip-add: peak +{peak_gain*100:.0f}%, {off_peak*100:.1f}% off peak"))
             elif not dry_run:
                 res = place_market_order(sym, "buy", notional=dip_usd)
                 if res.get("id"):
@@ -251,6 +261,7 @@ def run(dry_run=False, force=False):
     n_new     = 0
 
     print(f"  top RS: " + ", ".join(f"{s}({r*100:+.1f}%)" for s, r in ranked[:8]))
+    run.ranking = [(s, r, s in held) for s, r in ranked[:8]]
     for sym, rs in ranked:
         if n_new >= max_new or spent + entry_usd > budget:
             break
@@ -264,11 +275,9 @@ def run(dry_run=False, force=False):
         print(f"  {tag}↑ NEW ENTRY {sym}  RS {rs*100:+.1f}% → buy ${entry_usd:,.0f}")
         acts.append(f"🟢 NEW `{sym}` ${entry_usd:,.0f} (RS {rs*100:+.1f}%)")
         if notify:
-            if not dry_run:
-                ok, why = suggestions.fence_check(sym, "buy", entry_usd)
+            if preview or not dry_run:
                 rank = 1 + [s for s, _ in ranked].index(sym)
-                ideas.append(suggestions.record("swing", sym, "buy", entry_usd,
-                             f"momentum #{rank} (RS {rs*100:+.1f}%)", ok, why))
+                ideas.append(idea(sym, entry_usd, f"momentum #{rank} (RS {rs*100:+.1f}%)"))
         elif not dry_run:
             res = place_market_order(sym, "buy", notional=entry_usd)
             if res.get("id"):
@@ -293,6 +302,31 @@ def run(dry_run=False, force=False):
     state["last_run_date"] = today
     if not dry_run:
         save_state(state)
+    return [r for r in ideas if r]
+
+
+def preview_message(ideas, ranking, sw) -> str:
+    """The TEST text Peter receives: the day's ideas as they would be sent,
+    plus the top of the ranking with each name's verdict, plus the morning-
+    report line. Nothing here is an order."""
+    import suggestions
+    L = ["🧪 *TEST — Swing Buyer ideas, advice only, nothing ordered*",
+         "_How the daily note will look. Sent on request, not by the schedule._", ""]
+    if ideas:
+        L.append(f"*Today's note ({len(ideas)}):*")
+        L += [suggestions.format_line(r) for r in ideas]
+    else:
+        L.append("_No idea today: budget, regime or cooldowns left nothing to suggest._")
+    if ranking:
+        L += ["", f"*Top of today's ranking* (what it looks at; ${sw.get('entry_size_usd', 5000):,.0f} each if cash allowed):"]
+        for i, (s, r, held) in enumerate(ranking, 1):
+            ok, why = suggestions.preview_fence(s, "buy", sw.get("entry_size_usd", 5000))
+            tag = "held" if held else ("allowed" if ok else f"blocked: {why}")
+            L.append(f"{i}. `{s}` RS {r*100:+.1f}% — {tag}")
+    line = suggestions.notice_from_rows(ideas, [])
+    if line:
+        L += ["", "*In the morning report:*", line]
+    return "\n".join(L)
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -304,7 +338,19 @@ def main():
                     help="run even if swing.enabled=false in config")
     ap.add_argument("--rank",    action="store_true",
                     help="print regime + RS ranking and exit")
+    ap.add_argument("--preview", action="store_true",
+                    help="advice mode on today's market: build the note, text it as a TEST, record nothing")
     args = ap.parse_args()
+
+    if args.preview:
+        import urllib3
+        urllib3.disable_warnings()
+        ideas = run(preview=True)
+        text = preview_message(ideas, getattr(run, "ranking", []), load_config().get("swing", {}))
+        print("\n" + text)
+        if tg:
+            print("\ntelegram:", "sent" if tg.send(text) else "NOT sent")
+        return
 
     if args.rank:
         import urllib3

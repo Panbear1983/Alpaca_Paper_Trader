@@ -901,9 +901,11 @@ def is_eligible_ticker(ticker, cfg=None):
     return True
 
 
-def copy_trade(trade, all_pool_buys, state, cfg, mode="trade"):
+def copy_trade(trade, all_pool_buys, state, cfg, mode="trade", preview=False):
     """mode "notify" (2026-09-23): run every check, then record an IDEA instead
-    of an order; the disclosure is marked handled so it is suggested once."""
+    of an order; the disclosure is marked handled so it is suggested once.
+    `preview`: the notify path with nothing written and the fence judged as if
+    inside the window."""
     ticker        = trade["ticker"]
     tx_type       = trade["tx_type"]
     tx_id         = trade["tx_id"]
@@ -938,8 +940,9 @@ def copy_trade(trade, all_pool_buys, state, cfg, mode="trade"):
         qty = pos.get("qty", "0")
         if mode == "notify":
             import suggestions
-            suggestions.record("copier", ticker, "sell", 0, f"{who} sold", True, "")
-            state["copied"].append(tx_id)
+            if not preview:
+                suggestions.record("copier", ticker, "sell", 0, f"{who} sold", True, "")
+                state["copied"].append(tx_id)
             return False, f"IDEA sell — {who} sold; you hold {float(qty):g} sh", 0
         result = place_market_order(ticker, "sell", qty=qty)
         order_id = result.get("id", "")
@@ -999,10 +1002,11 @@ def copy_trade(trade, all_pool_buys, state, cfg, mode="trade"):
 
     if mode == "notify":
         import suggestions
-        ok, why = suggestions.fence_check(ticker, "buy", size)
+        ok, why = (suggestions.preview_fence if preview else suggestions.fence_check)(ticker, "buy", size)
         note = f"{who} bought" + (f", {consensus['n_members']} pool members agree" if consensus["is_consensus"] else "")
-        suggestions.record("copier", ticker, "buy", size, note, ok, why)
-        state["copied"].append(tx_id)
+        if not preview:
+            suggestions.record("copier", ticker, "buy", size, note, ok, why)
+            state["copied"].append(tx_id)
         return False, f"IDEA buy ${size:.0f} — {note} · {'allowed' if ok else 'blocked: ' + why}", size
 
     result = place_market_order(ticker, "buy", notional=size)
@@ -1025,7 +1029,11 @@ def copy_trade(trade, all_pool_buys, state, cfg, mode="trade"):
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-def run(dry_run=False):
+def run(dry_run=False, preview=False, preview_days=None):
+    """`preview` (2026-09-23): the advice path on a scratch copy of the state —
+    every disclosure of the last max_disclosure_lag_days is shown as it would
+    be suggested, nothing is written, no exits are run, and the text goes to
+    Telegram marked TEST."""
     import urllib3
     urllib3.disable_warnings()
 
@@ -1033,13 +1041,19 @@ def run(dry_run=False):
     state = load_state()
     cfg   = load_config()
 
-    # 1. Active management of existing positions runs every tick, before any new
-    #    copying — and regardless of pool state. In dry-run we ONLY preview this
-    #    (no orders, no new copies).
-    print(f"[{now}] Capitol Copier — dynamic position management"
-          f"{' (DRY RUN)' if dry_run else ''}")
-    manage_open_positions(cfg, dry_run=dry_run)
-    print()
+    if preview:
+        state = {**state, "copied": []}                 # scratch: show recent disclosures again
+        if preview_days:                                 # a wider window for the demo only
+            cfg = {**cfg, "capitol_copier": {**cfg["capitol_copier"], "max_disclosure_lag_days": int(preview_days)}}
+        print(f"[{now}] Capitol Copier — PREVIEW (advice only, nothing written)")
+    else:
+        # 1. Active management of existing positions runs every tick, before any new
+        #    copying — and regardless of pool state. In dry-run we ONLY preview this
+        #    (no orders, no new copies).
+        print(f"[{now}] Capitol Copier — dynamic position management"
+              f"{' (DRY RUN)' if dry_run else ''}")
+        manage_open_positions(cfg, dry_run=dry_run)
+        print()
 
     if dry_run:
         print("  DRY RUN — skipping new-trade copy loop.")
@@ -1077,14 +1091,14 @@ def run(dry_run=False):
     total_deployed = 0
     acts = []   # collect all copied trades, push ONE consolidated message at end
     import suggestions
-    mode = suggestions.mode_for(cfg.get("capitol_copier", {}), "copy_mode", "copy_on")
+    mode = "notify" if preview else suggestions.mode_for(cfg.get("capitol_copier", {}), "copy_mode", "copy_on")
     idea_lines = []
 
     for t in all_trades:
         if t["tx_id"] in state["copied"]:
             continue
 
-        copied, reason, size = copy_trade(t, all_pool_buys, state, cfg, mode=mode)
+        copied, reason, size = copy_trade(t, all_pool_buys, state, cfg, mode=mode, preview=preview)
         pid = t["politician_id"]
         lag = t.get("gap_days", "?")
         disclosed = t.get("pub_date", "?")
@@ -1110,6 +1124,17 @@ def run(dry_run=False):
         print("\n  No new trades to copy since last run.")
 
     # ── ONE consolidated push for all newly-copied trades (or ideas) ─────────
+    if preview:
+        head = ["🧪 *TEST — Capitol Copier ideas, advice only, nothing ordered*",
+                "_How the daily note will look: every disclosure of the last "
+                f"{cfg['capitol_copier'].get('max_disclosure_lag_days', 10)} days from the {len(pool)} followed "
+                "politicians, as it would be suggested. Sent on request, not by the schedule._", ""]
+        body = idea_lines or ["_No fresh disclosure passed the filters in that window._"]
+        text = "\n".join(head + body)
+        print("\n" + text)
+        if tg:
+            print("\ntelegram:", "sent" if tg.send(text) else "NOT sent")
+        return
     if acts and tg:
         tg.notify_batch("Capitol Copier · new trades", acts, emoji="🏛")
     if idea_lines and tg:
@@ -1274,6 +1299,10 @@ if __name__ == "__main__":
                          help="One-time reallocation toward target equity allocation via Capitol Copier picks")
     parser.add_argument("--target-pct", type=float, default=0.60,
                          help="Target fraction of equity actively invested (default 0.60)")
+    parser.add_argument("--preview", action="store_true",
+                        help="advice mode on today's disclosures: build the note, text it as a TEST, write nothing")
+    parser.add_argument("--preview-days", type=int, default=None,
+                        help="with --preview: look this many days back instead of max_disclosure_lag_days")
     parser.add_argument("--dry-run", action="store_true",
                          help="Preview dynamic-exit/pyramid decisions only — no orders, no new copies")
     parser.add_argument("--manage-only", action="store_true",
@@ -1288,5 +1317,7 @@ if __name__ == "__main__":
         rebalance(target_pct=args.target_pct)
     elif args.manage_only:
         manage_only(dry_run=args.dry_run)
+    elif args.preview:
+        run(preview=True, preview_days=args.preview_days)
     else:
         run(dry_run=args.dry_run)

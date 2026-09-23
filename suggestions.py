@@ -74,21 +74,45 @@ def short_reason(why: str) -> str:
     return names.get(head, w[:60])
 
 
+def build_row(engine: str, symbol: str, side: str, usd: float, reason: str,
+              fence_ok: bool, fence_why: str = "", session: str | None = None) -> dict:
+    """One idea as a dict. Pure — nothing is written."""
+    return {"ts": dt.datetime.now(ET).isoformat(timespec="seconds"), "session": session or session_today(),
+            "engine": engine, "symbol": str(symbol).upper(), "side": side, "usd": round(float(usd or 0), 2),
+            "reason": (reason or "")[:160], "fence_ok": bool(fence_ok), "fence_why": fence_why or ""}
+
+
 def record(engine: str, symbol: str, side: str, usd: float, reason: str,
            fence_ok: bool, fence_why: str = "", session: str | None = None) -> dict | None:
     """Append one idea; None when the same engine already logged that idea today."""
-    session = session or session_today()
-    symbol = str(symbol).upper()
+    row = build_row(engine, symbol, side, usd, reason, fence_ok, fence_why, session)
     for r in _rows():
-        if r.get("session") == session and r.get("engine") == engine and r.get("symbol") == symbol and r.get("side") == side:
+        if (r.get("session") == row["session"] and r.get("engine") == engine
+                and r.get("symbol") == row["symbol"] and r.get("side") == side):
             return None
-    row = {"ts": dt.datetime.now(ET).isoformat(timespec="seconds"), "session": session, "engine": engine,
-           "symbol": symbol, "side": side, "usd": round(float(usd or 0), 2), "reason": (reason or "")[:160],
-           "fence_ok": bool(fence_ok), "fence_why": fence_why or ""}
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, "a") as f:
         f.write(json.dumps(row) + "\n")
     return row
+
+
+def preview_fence(symbol: str, side: str, usd: float) -> tuple[bool, str]:
+    """The fence's verdict as it would stand at 10:00 New York on the next
+    trading weekday with the market open — for previews run outside the window.
+    The time-of-day rules are answered 'yes' by construction; the list, the
+    name count, the cash floor, the cooling-off pause and the daily halts are
+    judged on today's real account."""
+    try:
+        import time
+        import entry_gate as eg
+        now = dt.datetime.now(ET)
+        day = now.date() if now.weekday() < 5 else now.date() + dt.timedelta(days=7 - now.weekday())
+        at = dt.datetime.combine(day, dt.time(10, 0), tzinfo=ET)
+        eg._CACHE.update({"t": time.time(), "clock": {"is_open": True}})
+        ok, why, _ = eg.check_entry(symbol, side, notional=float(usd or 1.0), now=at)
+        return bool(ok), ("" if ok else short_reason(why))
+    except Exception as e:
+        return False, f"fence unavailable ({type(e).__name__})"
 
 
 def format_line(r: dict) -> str:
@@ -148,6 +172,13 @@ def notice(session: str, fills: list[dict] | None = None) -> str:
         return ""
     if fills is None:
         fills = fetch_manual_fills(session)
+    return notice_from_rows(rows, fills)
+
+
+def notice_from_rows(rows: list[dict], fills: list[dict]) -> str:
+    """The report line from rows already in hand (pure)."""
+    if not rows:
+        return ""
     rows = taken(rows, fills)
     by = {}
     for r in rows:

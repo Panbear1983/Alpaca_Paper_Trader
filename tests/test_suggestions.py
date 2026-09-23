@@ -58,3 +58,23 @@ def test_notice_line(monkeypatch, tmp_path):
     assert line.startswith("💡 Ideas from the engines (advice only): swing → ")
     assert "buy AMD $5,000 (allowed) — taken" in line and "buy INTC $5,000 (blocked, not on your list)" in line
     assert line.endswith("· taken 1/2")
+
+
+def test_build_row_is_pure_and_record_uses_it(monkeypatch, tmp_path):
+    monkeypatch.setattr(sg, "LOG", str(tmp_path / "s.jsonl"))
+    r = sg.build_row("copier", "hood", "buy", 1500, "K bought", False, "not on your list", session="2026-09-23")
+    assert r["symbol"] == "HOOD" and r["fence_ok"] is False and sg.for_session("2026-09-23") == []
+    assert sg.notice_from_rows([r], []).endswith("copier → buy HOOD $1,500 (blocked, not on your list) · taken 0/1")
+
+
+def test_preview_fence_judges_as_if_inside_the_window(monkeypatch):
+    import entry_gate as eg
+    monkeypatch.setattr(eg, "load_cfg", lambda: {"enabled": True, "universe": ["AMD"], "entry_window_et": ["09:30", "11:30"],
+                                                  "max_entries_per_name_per_day": 2, "max_entries_per_day": 0,
+                                                  "consecutive_loss_halt": 2, "daily_loss_limit_pct": 3.0})
+    monkeypatch.setattr(eg, "fetch_account", lambda: {"equity": "70000", "last_equity": "70000", "cash": "20000"})
+    monkeypatch.setattr(eg, "fetch_todays_orders", lambda now: [])
+    monkeypatch.setattr(eg, "fetch_clock", lambda: {"is_open": False})          # it is night; the preview ignores that
+    monkeypatch.setattr(eg, "read_journal", lambda: [])
+    assert sg.preview_fence("AMD", "buy", 5000) == (True, "")
+    assert sg.preview_fence("INTC", "buy", 5000) == (False, "not on your list")
