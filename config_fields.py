@@ -57,6 +57,10 @@ FIELDS: list[Field] = [
     Field("MASTER", "swing.enabled", "Swing buyer ON/OFF", "bool",
           danger="master",
           desc="Daily RS-momentum buys + dip-adds. Scheduler picks this up next tick."),
+    Field("MASTER", "swing.mode", "Swing buyer: trade or advise", "choice", choices=("trade", "notify", "off"),
+          desc="notify = the swing buyer runs its full logic but only SUGGESTS (Telegram + morning "
+               "report, with the fence's verdict); trade = it places the orders itself; off = idle. "
+               "A wallet without this setting behaves by the ON/OFF switch above."),
     Field("MASTER", "capitol_copier.exits_on", "Exit engine ON/OFF", "bool",
           danger="master",
           desc="Stops, trailing stops, take-profits and pyramids. Keep this ON — it is "
@@ -64,6 +68,9 @@ FIELDS: list[Field] = [
     Field("MASTER", "capitol_copier.copy_on", "Disclosure copying ON/OFF", "bool",
           danger="master",
           desc="Daily politician disclosure copy loop. Independent of the exit engine."),
+    Field("MASTER", "capitol_copier.copy_mode", "Copier: trade or advise", "choice", choices=("trade", "notify", "off"),
+          desc="notify = disclosed politician trades become SUGGESTIONS (Telegram + morning report, "
+               "with the fence's verdict), each one once; trade = they are copied as orders; off = idle."),
 
     # ── RISK RAILS ───────────────────────────────────────────────────────────
     Field("RISK", "pool.max_total_exposure_pct", "Max exposure (frac of equity)", "float",

@@ -901,11 +901,14 @@ def is_eligible_ticker(ticker, cfg=None):
     return True
 
 
-def copy_trade(trade, all_pool_buys, state, cfg):
+def copy_trade(trade, all_pool_buys, state, cfg, mode="trade"):
+    """mode "notify" (2026-09-23): run every check, then record an IDEA instead
+    of an order; the disclosure is marked handled so it is suggested once."""
     ticker        = trade["ticker"]
     tx_type       = trade["tx_type"]
     tx_id         = trade["tx_id"]
     politician_id = trade["politician_id"]
+    who           = trade.get("politician_name") or politician_id
 
     if tx_id in state["copied"]:
         return False, "already copied", 0
@@ -933,6 +936,11 @@ def copy_trade(trade, all_pool_buys, state, cfg):
         if not pos or "symbol" not in pos:
             return False, f"no position in {ticker} to sell", 0
         qty = pos.get("qty", "0")
+        if mode == "notify":
+            import suggestions
+            suggestions.record("copier", ticker, "sell", 0, f"{who} sold", True, "")
+            state["copied"].append(tx_id)
+            return False, f"IDEA sell — {who} sold; you hold {float(qty):g} sh", 0
         result = place_market_order(ticker, "sell", qty=qty)
         order_id = result.get("id", "")
         status   = result.get("status", result.get("message", "unknown"))
@@ -988,6 +996,14 @@ def copy_trade(trade, all_pool_buys, state, cfg):
     max_exposure = equity * cfg["pool"]["max_total_exposure_pct"]
     if exposure + size > max_exposure:
         return False, f"would breach {cfg['pool']['max_total_exposure_pct']*100:.0f}% exposure cap (${exposure:.0f}/${max_exposure:.0f})", 0
+
+    if mode == "notify":
+        import suggestions
+        ok, why = suggestions.fence_check(ticker, "buy", size)
+        note = f"{who} bought" + (f", {consensus['n_members']} pool members agree" if consensus["is_consensus"] else "")
+        suggestions.record("copier", ticker, "buy", size, note, ok, why)
+        state["copied"].append(tx_id)
+        return False, f"IDEA buy ${size:.0f} — {note} · {'allowed' if ok else 'blocked: ' + why}", size
 
     result = place_market_order(ticker, "buy", notional=size)
     order_id = result.get("id", "")
@@ -1060,12 +1076,15 @@ def run(dry_run=False):
     new_buys, new_sells, skipped = 0, 0, 0
     total_deployed = 0
     acts = []   # collect all copied trades, push ONE consolidated message at end
+    import suggestions
+    mode = suggestions.mode_for(cfg.get("capitol_copier", {}), "copy_mode", "copy_on")
+    idea_lines = []
 
     for t in all_trades:
         if t["tx_id"] in state["copied"]:
             continue
 
-        copied, reason, size = copy_trade(t, all_pool_buys, state, cfg)
+        copied, reason, size = copy_trade(t, all_pool_buys, state, cfg, mode=mode)
         pid = t["politician_id"]
         lag = t.get("gap_days", "?")
         disclosed = t.get("pub_date", "?")
@@ -1080,16 +1099,21 @@ def run(dry_run=False):
                 new_sells += 1
                 acts.append(f"🔴 SELL `{t['ticker']}`")
             print(f"  ✓ COPIED  [{pid}] {symbol}  disclosed={disclosed}  lag={lag}d  → {reason}")
+        elif reason.startswith("IDEA"):
+            idea_lines.append(f"💡 {t['tx_type'].upper()} `{t['ticker']}` {reason[5:].strip()}")
+            print(f"  💡 IDEA    [{pid}] {symbol}  disclosed={disclosed}  lag={lag}d  → {reason[5:].strip()}")
         else:
             skipped += 1
             print(f"  ✗ SKIP    [{pid}] {symbol}  disclosed={disclosed}  lag={lag}d  → {reason}")
 
-    if new_buys == 0 and new_sells == 0:
+    if new_buys == 0 and new_sells == 0 and not idea_lines:
         print("\n  No new trades to copy since last run.")
 
-    # ── ONE consolidated push for all newly-copied trades ────────────────────
+    # ── ONE consolidated push for all newly-copied trades (or ideas) ─────────
     if acts and tg:
         tg.notify_batch("Capitol Copier · new trades", acts, emoji="🏛")
+    if idea_lines and tg:
+        tg.notify_batch("Capitol Copier · ideas (advice only)", idea_lines, emoji="💡")
 
     print(f"\n  Session: +{new_buys} buys, +{new_sells} sells, {skipped} skips, "
           f"${total_deployed:.0f} deployed")

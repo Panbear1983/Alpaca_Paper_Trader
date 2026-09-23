@@ -540,6 +540,12 @@ _SECTION_ZH: dict[str, str] = {
 }
 
 _FIELD_ZH: dict[str, tuple[str, str]] = {
+    "swing.mode": (
+        "波段買手：下單或建議",
+        "notify = 波段買手照常運算，但只給建議（Telegram 與晨報，附圍欄判定）；trade = 自行下單；off = 停用。未設定此項的錢包依上方開關運作。"),
+    "capitol_copier.copy_mode": (
+        "跟單：下單或建議",
+        "notify = 政治人物申報交易只成為建議（Telegram 與晨報，附圍欄判定），每筆一次；trade = 照單複製下單；off = 停用。"),
     "anchor.universe": (
         "允許買入的股票（白名單）",
         "圍欄開啟時只能買入這些代號 — 包含本儀表板的手動買入。圍欄關閉 = 不限制。"

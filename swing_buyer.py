@@ -129,12 +129,16 @@ def run(dry_run=False, force=False):
 
     cfg = load_config()
     sw  = cfg.get("swing", {})
-    if not sw.get("enabled", False) and not (dry_run or force):
-        print("  swing buyer disabled in config (swing.enabled=false) — exiting.")
+    import suggestions
+    mode = suggestions.mode_for(sw, "mode", "enabled")      # trade | notify | off
+    if mode == "off" and not (dry_run or force):
+        print("  swing buyer disabled in config (swing.enabled=false / mode off) — exiting.")
         return
+    notify = (mode == "notify")                              # advice only: ideas, never orders
+    ideas = []
 
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    tag = "[DRY] " if dry_run else ""
+    tag = "[DRY] " if dry_run else ("[IDEA] " if notify else "")
     today = dt.date.today().isoformat()
     print(f"[{now}] Swing Buyer{' (DRY RUN)' if dry_run else ''}")
 
@@ -230,7 +234,12 @@ def run(dry_run=False, force=False):
                   f"{off_peak*100:.1f}% off peak, still +{(cur/entry-1)*100:.1f}% "
                   f"→ add ${dip_usd:,.0f}")
             acts.append(f"🔵 DIP-ADD `{sym}` ${dip_usd:,.0f} ({off_peak*100:.1f}% off peak)")
-            if not dry_run:
+            if notify:
+                if not dry_run:
+                    ok, why = suggestions.fence_check(sym, "buy", dip_usd)
+                    ideas.append(suggestions.record("swing", sym, "buy", dip_usd,
+                                 f"dip-add: peak +{peak_gain*100:.0f}%, {off_peak*100:.1f}% off peak", ok, why))
+            elif not dry_run:
                 res = place_market_order(sym, "buy", notional=dip_usd)
                 if res.get("id"):
                     state["dip_adds"][sym] = today
@@ -254,7 +263,13 @@ def run(dry_run=False, force=False):
             break
         print(f"  {tag}↑ NEW ENTRY {sym}  RS {rs*100:+.1f}% → buy ${entry_usd:,.0f}")
         acts.append(f"🟢 NEW `{sym}` ${entry_usd:,.0f} (RS {rs*100:+.1f}%)")
-        if not dry_run:
+        if notify:
+            if not dry_run:
+                ok, why = suggestions.fence_check(sym, "buy", entry_usd)
+                rank = 1 + [s for s, _ in ranked].index(sym)
+                ideas.append(suggestions.record("swing", sym, "buy", entry_usd,
+                             f"momentum #{rank} (RS {rs*100:+.1f}%)", ok, why))
+        elif not dry_run:
             res = place_market_order(sym, "buy", notional=entry_usd)
             if res.get("id"):
                 state["entries"][sym] = today
@@ -263,10 +278,17 @@ def run(dry_run=False, force=False):
 
     if not acts:
         print("  no buy triggers this run (dips shallow / RS flat / caps binding).")
+    elif notify:
+        print(f"  {len(acts)} idea(s) — advice only, nothing ordered.")
     else:
         print(f"  deployed ${spent:,.0f} across {len(acts)} orders.")
     if acts and tg and not dry_run:
-        tg.notify_batch("Swing Buyer · daily run", acts, emoji="🛒")
+        if notify:
+            lines = [suggestions.format_line(r) for r in ideas if r]
+            if lines:
+                tg.notify_batch("Swing Buyer · ideas (advice only)", lines, emoji="💡")
+        else:
+            tg.notify_batch("Swing Buyer · daily run", acts, emoji="🛒")
 
     state["last_run_date"] = today
     if not dry_run:

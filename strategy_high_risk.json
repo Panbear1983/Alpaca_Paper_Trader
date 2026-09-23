@@ -204,7 +204,8 @@
     "dip_cooldown_days": 5,
     "stop_cooldown_days": 3,
     "min_cash_reserve_usd": 1500,
-    "max_holdings": 15
+    "max_holdings": 15,
+    "mode": "notify"
   },
   "trading_schedule": {
     "manage_every_minutes": 15,
@@ -232,7 +233,8 @@
     "sentiment_veto_enabled": false,
     "autorun_enabled": false,
     "exits_on": true,
-    "copy_on": true
+    "copy_on": true,
+    "copy_mode": "notify"
   },
   "pool": {
     "max_size": 5,

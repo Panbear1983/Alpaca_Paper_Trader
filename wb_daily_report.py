@@ -493,8 +493,19 @@ def _earnings_notice(held: list, sess: str) -> str:
         return ""
 
 
+def _ideas_notice(sess: str) -> str:
+    """The engines' advice-only ideas for the session (suggestions.py); silent
+    when there were none, never a reason for the report not to go out."""
+    try:
+        import suggestions
+        return suggestions.notice(sess)
+    except Exception:
+        return ""
+
+
 def build_brief_report(d: Dict[str, Any], assessment: str = "",
-                       tomorrow: str = "", holiday: str = "", earnings: str = "") -> str:
+                       tomorrow: str = "", holiday: str = "", earnings: str = "",
+                       ideas: str = "") -> str:
     """High Risk only, target <=100 words."""
     L: List[str] = []
     L.append(f"📊 *High Risk* — Session {d.get('session','?')} (ET)")
@@ -541,6 +552,9 @@ def build_brief_report(d: Dict[str, Any], assessment: str = "",
     if earnings:
         L.append("")
         L.append(earnings)
+    if ideas:
+        L.append("")
+        L.append(ideas)
     note = _review_due()
     if note:
         L.append("")
@@ -612,7 +626,8 @@ def _spell(sym: str) -> str:
 
 def speakable(d: Dict[str, Any], assessment: str = "", outlook: str = "",
               oversight: str = "", proposals: "list | None" = None,
-              weekly: bool = False, holiday: str = "", earnings: str = "") -> str:
+              weekly: bool = False, holiday: str = "", earnings: str = "",
+              ideas: str = "") -> str:
     """A spoken script built from the data, not from the markdown.
 
     Reading the rendered report aloud would say "asterisk", the bullet
@@ -670,6 +685,8 @@ def speakable(d: Dict[str, Any], assessment: str = "", outlook: str = "",
         parts.append(re.sub(r"^[^\w]+", "", holiday).strip())
     if earnings:
         parts.append(despell(re.sub(r"^[^\w]+", "", earnings).strip()))
+    if ideas:
+        parts.append(despell(re.sub(r"^[^\w]+", "", ideas).strip()))
     if oversight:
         parts.append(("Weekly assessment." if weekly else "Oversight.") + " " + despell(oversight))
         for p in (proposals or []):
@@ -942,7 +959,7 @@ def send_brief_report(push: bool = True, channel: str | None = None, log=print,
         log("[2/3] Analyst skipped.")
         _, ctx = _facts_block(d)
 
-    holiday = earnings = ""
+    holiday = earnings = ideas = ""
     if d.get("ok"):
         creds = wallets.resolve(wallet)
         if creds:
@@ -952,8 +969,11 @@ def send_brief_report(push: bool = True, channel: str | None = None, log=print,
         earnings = _earnings_notice(d.get("held") or [], sess)
         if earnings:
             log(f"✓ {earnings}")
+        ideas = _ideas_notice(sess)
+        if ideas:
+            log(f"✓ {ideas}")
 
-    report = build_brief_report(d, a, t_, holiday, earnings)
+    report = build_brief_report(d, a, t_, holiday, earnings, ideas)
 
     # Claude's oversight read, appended so Peter gets ONE morning message rather
     # than two. Bounded and optional by design: if it is slow or fails, the
@@ -1000,7 +1020,7 @@ def send_brief_report(push: bool = True, channel: str | None = None, log=print,
         log("[3/4] Recording voice note…")
         ogg = render_voice(speakable(d, a, t_, oversight=ov_text,
                                      proposals=ov_proposals, weekly=_is_weekly,
-                                     holiday=holiday, earnings=earnings), sess)
+                                     holiday=holiday, earnings=earnings, ideas=ideas), sess)
         log(f"✓ Voice: {ogg}" if ogg else "⚠ voice unavailable — text only")
 
     sent = False
