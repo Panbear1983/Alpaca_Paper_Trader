@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.alpacapapertrader.sell_stop</string>
+
+  <!-- The five-up-days sell rule for the High Risk wallet (sell_stop.py).
+       17:00 Taipei = 05:00 New York, after the previous session's close and
+       before the next open. Mon-Fri Taipei, like the Hermes cron job it
+       replaces (2026-09-23): a deterministic rule should not need a language
+       model to press its own button. Core holds are warned about, never sold. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/venv/bin/python</string>
+    <string>/Users/peter/GitHub/Alpaca_Paper_Trader/sell_stop.py</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/sell_stop.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/peter/GitHub/Alpaca_Paper_Trader/.logs/sell_stop.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+  </dict>
+
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

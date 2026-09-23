@@ -301,6 +301,13 @@ def build_wallets_report(results: list[dict],
         else:
             L.append(f"_{t('rpt.all_cash')}_")
 
+        # Phase 2 scorecard (2026-09-23): boxed wallet only, [] elsewhere.
+        try:
+            import scorecard
+            L.extend(scorecard.scorecard(name, t))
+        except Exception:
+            pass
+
         fills = fills_by_wallet.get(name, [])
         if fills:
             L.append(f"*{t('rpt.trades')}*")

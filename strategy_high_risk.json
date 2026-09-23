@@ -317,7 +317,7 @@
     ],
     "max_entries_per_name_per_day": 2,
     "max_entries_per_day": 0,
-    "position_pct": 1.0,
+    "position_pct": 0.05,
     "max_stop_pct": 0.05,
     "breakeven_at_r": 1.0,
     "partial_take_at_r": 2.0,
@@ -335,7 +335,8 @@
     "cooling_off_pct": 8.0,
     "cooling_off_days": 5,
     "max_open_names": 5,
-    "min_cash_pct": 0.2
+    "min_cash_pct": 0.2,
+    "scorecard_since": "2026-08-29"
   },
   "price_watcher": {
     "buyback_mode": "notify"
