@@ -150,7 +150,7 @@ FIELDS: list[Field] = [
           desc="Filled buys allowed per anchor name per session. Counted from Alpaca fills."),
     Field("ANCHOR", "anchor.max_entries_per_day", "Entries per day, all names (0=off)", "int", 0, 20,
           desc="Total filled buys per session across the anchors. 0 disables the total cap."),
-    Field("ANCHOR", "anchor.position_pct", "Anchor position size (frac of equity)", "float", 0.05, 0.25,
+    Field("ANCHOR", "anchor.position_pct", "Robot entry size per buy (frac of equity)", "float", 0.05, 0.25,
           danger="exposure",
           desc="anchor_trade.py sizes each name to this share of equity. Cannot exceed risk.max_position_pct."),
     Field("ANCHOR", "anchor.max_stop_pct", "Max initial stop (frac)", "float", 0.01, 0.05,
@@ -237,7 +237,7 @@ FIELDS: list[Field] = [
     Field("ANCHOR", "anchor.max_open_names", "Max names held at once", "int", 1, 15,
           desc="A buy of a NEW name is refused when this many are already held. The allow "
                "list is a menu, not a portfolio. 0 = off."),
-    Field("ANCHOR", "anchor.min_cash_pct", "Cash floor (frac of equity)", "float", 0.0, 0.5,
+    Field("ANCHOR", "anchor.min_cash_pct", "Cash floor: keep this much in cash (frac)", "float", 0.0, 0.5,
           desc="A buy that would take cash below this share of equity is refused. 0 = off."),
 
     # ── SCHEDULER ────────────────────────────────────────────────────────────
