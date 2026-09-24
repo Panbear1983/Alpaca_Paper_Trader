@@ -297,6 +297,7 @@
   "anchor": {
     "enabled": true,
     "universe": [
+      "MRNA",
       "AAPL",
       "MSFT",
       "NVDA",
@@ -337,7 +338,7 @@
     "cooling_off_pct": 8.0,
     "cooling_off_days": 5,
     "max_open_names": 5,
-    "min_cash_pct": 0.2,
+    "min_cash_pct": 0.0,
     "scorecard_since": "2026-08-29"
   },
   "price_watcher": {
