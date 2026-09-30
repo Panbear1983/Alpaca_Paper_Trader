@@ -116,3 +116,11 @@ def test_drift_lines_only_for_unlogged_changes():
     assert len(out) == 1 and out[0].startswith("strategy_high_risk.json was rewritten since the 2026-09-21T16:15")
     assert "anchor.universe" in out[0]
     assert ov.drift_lines({}, cur, set()) == []                  # first run only records
+
+
+def test_cron_bookkeeping_is_not_a_rewrite():
+    old = {"jobs": [{"id": "a", "prompt": "p", "schedule": {"expr": "* * * * *"}, "last_run_at": "t1", "repeat": {"completed": 1}}], "updated_at": "x"}
+    new = {"jobs": [{"id": "a", "prompt": "p", "schedule": {"expr": "* * * * *"}, "last_run_at": "t2", "repeat": {"completed": 2}}], "updated_at": "y"}
+    assert ov._json_changed_keys(old, new, ignore_volatile=True) == []
+    new["jobs"][0]["prompt"] = "changed"
+    assert ov._json_changed_keys(old, new, ignore_volatile=True) == ["jobs"]

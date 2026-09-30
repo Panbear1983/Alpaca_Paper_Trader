@@ -329,8 +329,26 @@ def guard_facts(sess: str) -> list[str]:
 
 # ── step 9: did anyone rewrite what only Claude should write? ────────────────
 
-def _json_changed_keys(old, new, prefix: str = "", depth: int = 2) -> list[str]:
+# Bookkeeping the Hermes scheduler rewrites on every run. Not a rewrite of the
+# job itself — ignored when the cron file is compared (2026-09-30: the check had
+# flagged jobs.json after an ordinary run).
+_VOLATILE_KEYS = {"last_run_at", "next_run_at", "updated_at", "last_status", "last_error",
+                  "last_delivery_error", "fire_claim", "failure_streak", "state", "monitor_state",
+                  "paused_at", "paused_reason", "repeat", "drift_alerted", "output_file"}
+
+
+def _strip_volatile(x):
+    if isinstance(x, dict):
+        return {k: _strip_volatile(v) for k, v in x.items() if k not in _VOLATILE_KEYS}
+    if isinstance(x, list):
+        return [_strip_volatile(v) for v in x]
+    return x
+
+
+def _json_changed_keys(old, new, prefix: str = "", depth: int = 2, ignore_volatile: bool = False) -> list[str]:
     """Dotted keys that differ between two JSON values, two levels deep."""
+    if ignore_volatile:
+        old, new = _strip_volatile(old), _strip_volatile(new)
     if not (isinstance(old, dict) and isinstance(new, dict)) or depth == 0:
         return [prefix.rstrip(".")] if old != new else []
     out: list[str] = []
@@ -373,7 +391,10 @@ def watched_drift(now: dt.datetime | None = None) -> list[str]:
         snap = WATCH_SNAP / f"{which}.snap"
         if which in prev and prev[which].get("digest") != entry["digest"] and path.suffix == ".json":
             try:
-                entry["keys"] = _json_changed_keys(json.loads(snap.read_text()), json.loads(path.read_text()))
+                entry["keys"] = _json_changed_keys(json.loads(snap.read_text()), json.loads(path.read_text()),
+                                                   ignore_volatile=(which == "wb_cron"))
+                if not entry["keys"]:                       # only the scheduler's bookkeeping moved
+                    entry["digest"] = prev[which].get("digest")
             except Exception:
                 pass
         if which in prev:
