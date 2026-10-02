@@ -39,7 +39,8 @@ LOG_FILE = os.path.join(os.path.dirname(__file__), "performance_log.json")
 # five engines' trades were pooled under one name and could never be told apart.
 KNOWN_SOURCES = {"isr", "swing", "intraday", "copier", "watcher",
                  "hedge", "picker", "rebalance", "manual", "anchor", "other",
-                 "pstop"}      # broker-side trailing-stop guards (broker_stops.py)
+                 "pstop",      # broker-side trailing-stop guards (broker_stops.py)
+                 "wbauto"}     # Wanna Buffet trading its own wallet (wbauto.py)
 
 
 def source_of(order):

@@ -1,8 +1,8 @@
 """Per-wallet code ceilings — no network.
 
 High Risk is boxed at 25% per name and 1.0x gross no matter what the strategy
-file says; the two benchmark wallets keep the old 1.0 / 2.0 ceilings so their
-behaviour is byte-for-byte what it was before 2026-09-22.
+file says; Low Risk keeps the old 1.0 / 2.0 ceilings. Photonic CPO ETF now has
+its own Wanna_buffet mandate ceilings, covered by test_wb_integration.py.
 """
 import sys
 from pathlib import Path
@@ -40,11 +40,10 @@ def test_high_risk_regime_scaling_cannot_lift_above_1x(monkeypatch):
     assert cc._max_gross_exposure() == 1.0
 
 
-def test_benchmark_wallets_keep_the_old_ceilings(monkeypatch):
-    for w in ("Low Risk", "Photonic CPO ETF"):
-        _use(monkeypatch, w, {"max_position_pct": 1.0, "max_gross_exposure": 2.0})
-        assert cc._max_position_pct() == 1.0, w
-        assert cc._max_gross_exposure() == 2.0, w
+def test_low_risk_keeps_the_old_ceilings(monkeypatch):
+    _use(monkeypatch, "Low Risk", {"max_position_pct": 1.0, "max_gross_exposure": 2.0})
+    assert cc._max_position_pct() == 1.0
+    assert cc._max_gross_exposure() == 2.0
 
 
 def test_benchmark_wallet_regime_scaling_unchanged(monkeypatch):
@@ -101,3 +100,13 @@ def test_benchmark_wallet_trim_behaviour_unchanged(monkeypatch):
     assert n == 0 and acts == []
     n, acts = _trim(monkeypatch, "Low Risk", {"max_position_pct": 0.30, "max_gross_exposure": 2.0})
     assert n == 1 and "TSLA" in acts[0]
+
+
+def test_the_agents_wallet_has_no_code_ceiling(monkeypatch):
+    """Peter, 2026-10-02: no guardrail from outside on the wallet the agent trades
+    by itself — its own file is the only limit (here 1.0 / 2.0, the old defaults)."""
+    for w in ("Wanna_Buffet Auto Trading", "Photonic CPO ETF"):
+        assert cc.hard_limits_for(w) is None
+        _use(monkeypatch, w, {"max_position_pct": 1.0, "max_gross_exposure": 2.0})
+        assert cc._max_position_pct() == 1.0, w
+        assert cc._max_gross_exposure() == 2.0, w

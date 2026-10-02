@@ -269,7 +269,13 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true", help="always print, even when nothing is in play")
     ap.add_argument("--session", help="replay this session date (YYYY-MM-DD)")
     ap.add_argument("--at", default="11:30", help="ET time within --session (HH:MM), default 11:30")
+    ap.add_argument("--wallet", default=None, help="Target wallet name (e.g. 'Photonic CPO ETF')")
     a = ap.parse_args()
+
+    if a.wallet:
+        import wallets, strategies
+        wallets.apply(a.wallet)
+        strategies.set_active(a.wallet)
 
     cfg = eg.load_cfg()
     universe = [str(u).upper() for u in (cfg.get("universe") or [])]

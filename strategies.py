@@ -69,7 +69,19 @@ def set_active(name: str | None) -> None:
 
 
 def path_for(wallet: str | None = None) -> str:
-    return os.path.join(HERE, f"strategy_{slug(wallet or active())}.json")
+    s = slug(wallet or active())
+    primary = os.path.join(HERE, f"strategy_{s}.json")
+    if os.path.exists(primary):
+        return primary
+    if s == "photonic_cpo_etf":
+        alt = os.path.join(HERE, "strategy_wanna_buffet_auto_trading.json")
+        if os.path.exists(alt):
+            return alt
+    elif s == "wanna_buffet_auto_trading":
+        alt = os.path.join(HERE, "strategy_photonic_cpo_etf.json")
+        if os.path.exists(alt):
+            return alt
+    return primary
 
 
 def load_strategy(wallet: str | None = None) -> dict:

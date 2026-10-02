@@ -118,3 +118,22 @@ def test_data_failure_fails_closed(monkeypatch):
     monkeypatch.setattr(eg, "fetch_account", boom)
     ok, why, cat = eg.check_entry("AAPL", "buy", notional=100, now=MON_10, cfg=CFG)
     assert not ok and cat == "daily_loss" and "refusing" in why
+
+
+def test_regime_filter_blocks_long_and_allows_inverse(monkeypatch):
+    import market_context as mc
+    _setup(monkeypatch)
+    monkeypatch.setattr(mc, "regime_state", lambda sess=None: {"state": "bear", "regime": "cyclical_bear"})
+
+    regime_cfg = dict(CFG, regime_filter_enabled=True, universe=["AAPL", "SH"], inverse_etf_universe=["SH"])
+    # Normal anchor buy should be rejected in bear regime
+    ok, why, cat = eg.check_entry("AAPL", "buy", notional=100, now=MON_10, cfg=regime_cfg)
+    assert not ok
+    assert cat == "regime"
+    assert "bear regime" in why
+
+    # Inverse ETF buy should pass
+    ok_inv, why_inv, _ = eg.check_entry("SH", "buy", notional=100, now=MON_10, cfg=regime_cfg)
+    assert ok_inv is True
+    assert why_inv == ""
+

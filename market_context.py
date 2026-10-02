@@ -88,8 +88,8 @@ def sector_rotation(session: str, lookback_days: int = 7) -> List[Dict[str, Any]
     return sorted(out, key=lambda x: -x["d1"])
 
 
-def spy_regime(session: str) -> Dict[str, Any]:
-    """SPY against its own 50 and 200 day averages. Regime, not prediction."""
+def spy_regime(session: str, active_returns_30d: float | None = None, benchmark_returns_30d: float | None = None) -> Dict[str, Any]:
+    """SPY against its own 50 and 200 day averages with multi-factor regime metrics."""
     start = (dt.date.fromisoformat(session) - dt.timedelta(days=420)).isoformat()
     b = [x for x in (_bars(["SPY"], start).get("SPY") or []) if x["t"][:10] <= session]
     if len(b) < 60:
@@ -101,6 +101,23 @@ def spy_regime(session: str) -> Dict[str, Any]:
             sma = sum(closes[-n:]) / n
             out[f"sma{n}"] = sma
             out[f"vs{n}"] = (closes[-1] - sma) / sma * 100
+
+    # Enrich with hierarchical regime analysis from regime_engine
+    try:
+        from regime_engine import RegimeDetector
+        detector = RegimeDetector()
+        metrics = detector.evaluate(b, active_returns_30d=active_returns_30d, benchmark_returns_30d=benchmark_returns_30d)
+        out["regime"] = metrics.regime.value
+        out["bias"] = metrics.bias.value
+        out["adx14"] = metrics.adx_14
+        out["rsi14"] = metrics.rsi_14
+        out["realized_vol_pct"] = metrics.realized_vol_pct
+        out["slope200"] = metrics.slope_200
+        out["churn_throttle_multiplier"] = metrics.churn_throttle_multiplier
+        out["regime_reasons"] = metrics.reasons
+    except Exception:
+        pass
+
     return out
 
 
@@ -137,7 +154,11 @@ def regime_state(session: str | None = None, force: bool = False) -> Dict[str, A
         above200 = r["vs200"] >= 0
         above50 = r.get("vs50", 0) >= 0
         out["state"] = "bull" if (above200 and above50) else ("neutral" if above200 else "bear")
-        out.update({k: r[k] for k in ("close", "sma50", "sma200", "vs50", "vs200") if k in r})
+        out.update({k: r[k] for k in (
+            "close", "sma50", "sma200", "vs50", "vs200",
+            "regime", "bias", "adx14", "rsi14", "realized_vol_pct",
+            "slope200", "churn_throttle_multiplier", "regime_reasons"
+        ) if k in r})
     try:
         REGIME_CACHE.write_text(json.dumps(out, indent=2))
     except Exception:

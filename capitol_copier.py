@@ -166,13 +166,17 @@ HARD_MAX_GROSS_EXPOSURE = 2.0    # default ceiling for wallets NOT listed in HAR
 # Per-wallet code ceilings (2026-09-22). These are the un-arguable limits: the
 # dashboard and the strategy file may set a wallet LOWER than its row here,
 # never higher, and nothing an agent can write to disk changes them. Keyed by
-# wallet so the two benchmark wallets (Low Risk, Photonic) keep their old
-# limits byte for byte — Peter measures High Risk against them.
+# wallet so Low Risk retains its previous ceilings. Photonic CPO ETF is now
+# managed under Wanna_buffet's client mandate: 20% per name and 1.0x gross.
 #
 # High Risk: 25% per name, no borrowing. The August loss was 3.5x leverage
 # into seven names at once; a 25%/1.0x box makes that arithmetic impossible.
 HARD_LIMITS = {
     "High Risk": {"position_pct": 0.25, "gross": 1.0},
+    # "Wanna_Buffet Auto Trading" (ex Photonic CPO ETF) has NO row on purpose:
+    # Peter's instruction of 2026-10-02 — the agent trades that wallet on its own
+    # with no guardrail imposed from outside; its caps live in its own strategy
+    # file and it may change them (see wbauto.py).
 }
 _DEFAULT_HARD = {"position_pct": HARD_MAX_POSITION_PCT, "gross": HARD_MAX_GROSS_EXPOSURE}
 
@@ -367,6 +371,7 @@ SOURCE_BY_MODULE = {
     "opportunistic_picker":  "picker",
     "rebalance_top_n":       "rebalance",
     "anchor_trade":          "anchor",
+    "wbauto":                "wbauto",     # Wanna Buffet trading its own wallet (wbauto.py)
     "tui":                   "manual",
     "manual_trade":          "manual",
     "broker_stops":          "pstop",      # resting trailing-stop guards at the broker
@@ -421,7 +426,12 @@ def _log_guardrail(ticker, side, notional, qty, which, why):
         from datetime import datetime as _dt
         d = _HERE / "diary" if "_HERE" in globals() else Path(__file__).resolve().parent / "diary"
         d.mkdir(parents=True, exist_ok=True)
-        row = {"ts": _dt.now().isoformat(timespec="seconds"), "symbol": ticker,
+        try:
+            import wallets as _w
+            _wallet = _w.current()
+        except Exception:
+            _wallet = None
+        row = {"ts": _dt.now().isoformat(timespec="seconds"), "wallet": _wallet, "symbol": ticker,
                "side": side, "notional": notional, "qty": qty,
                "cap": which.replace("check_", "").replace("_cap", ""),
                "reason": why, "source": _caller_source(depth=3)}

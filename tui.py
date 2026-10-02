@@ -69,6 +69,7 @@ import strategies
 import compare as cmpw
 import i18n
 from i18n import t
+import price_streaks as ps
 
 try:
     import telegram_notifier as tg
@@ -221,7 +222,8 @@ def fetch_asset_name(symbol: str) -> str:
 _CODE_FILES = ("tui.py", "i18n.py", "wallets.py", "strategies.py", "compare.py",
                "config_fields.py", "config_io.py", "hermes_report.py",
                "wallet_report.py", "report_scheduler.py",
-               "capitol_copier.py", "swing_buyer.py", "intraday_momentum.py")
+               "capitol_copier.py", "swing_buyer.py", "intraday_momentum.py",
+               "price_streaks.py")
 
 
 def _code_mtime() -> float:
@@ -1613,7 +1615,8 @@ class AlpacaTUI(App):
                           i18n.t("col.price"), i18n.t("col.mkt_val"),
                           i18n.t("col.cost"), i18n.t("col.pl_usd"),
                           i18n.t("col.pl_pct"), i18n.t("col.day_pl_usd"),
-                          i18n.t("col.day_pl_pct"))
+                          i18n.t("col.day_pl_pct"),
+                          i18n.t("col.streak"), i18n.t("col.streak_pct"))
         else:
             t.add_columns(i18n.t("col.sym"), i18n.t("col.side"),
                           i18n.t("col.qty_usd"), i18n.t("col.status"),
@@ -1632,6 +1635,7 @@ class AlpacaTUI(App):
         self._log(t("log.boot2", status=self._schedule_status()))
         self.refresh_data()
         self.set_interval(8, self.refresh_data)
+        self.set_interval(60, self.refresh_streaks)
         self.set_interval(60, self._check_code_freshness)
         # TUI-owned auto-report: this always-on process IS the scheduler (the
         # launchd heartbeat has been TCC-dead since ~Jul 5). Same config block
@@ -1868,6 +1872,24 @@ class AlpacaTUI(App):
         # Refresh chart with latest data after apply — clear cache so bars are fresh
         self._hist_cache.clear()
         self.call_from_thread(self._fetch_and_render)
+
+        # Trigger streak update if any position is missing cached bars
+        syms = [p.get("symbol") for p in positions if p.get("symbol")]
+        if any(not ps.get_cached_bars(s) for s in syms):
+            self.refresh_streaks()
+
+    @work(thread=True, exclusive=True, group="streaks")
+    def refresh_streaks(self) -> None:
+        positions = self._positions_cache or []
+        syms = [p.get("symbol") for p in positions if p.get("symbol")]
+        if not syms:
+            return
+        try:
+            creds = wl.resolve(wl.current())
+            ps.update_bars_cache(syms, creds=creds)
+            self.call_from_thread(self._repopulate_table)
+        except Exception:
+            pass
 
     # ── ticker bio search ──────────────────────────────────────────────────────
     def action_focus_search(self) -> None:
@@ -2266,6 +2288,11 @@ class AlpacaTUI(App):
                 day_plpc = _f(p.get("unrealized_intraday_plpc")) * 100
                 col  = "green" if pl >= 0 else "red"
                 day_col = "green" if day_pl >= 0 else "red"
+                streak, streak_pct = ps.get_streak_for_symbol(
+                    sym, current_price=cur, is_market_open=bool(self.market_open)
+                )
+                streak_text = ps.format_streak(streak)
+                streak_pct_text = ps.format_streak_pct(streak_pct, streak)
                 t.add_row(
                     (f"{sym} ★" if sym in core else sym),   # ★ = core hold (key C)
                     f"{qty:g}", f"{avg:.2f}", f"{cur:.2f}",
@@ -2273,6 +2300,8 @@ class AlpacaTUI(App):
                     Text(f"{pl:+,.0f}", style=col), Text(f"{plpc:+.1f}%", style=col),
                     Text(f"{day_pl:+,.0f}", style=day_col),
                     Text(f"{day_plpc:+.1f}%", style=day_col),
+                    streak_text,
+                    streak_pct_text,
                     key=sym,
                 )
                 self._syms.append(sym)

@@ -35,7 +35,7 @@
         "secret_env": "ALPACA_SECRET_KEY_LOWRISK",
         "base_env": "ALPACA_BASE_URL"
       },
-      "Photonic CPO ETF": {
+      "Wanna_Buffet Auto Trading": {
         "key_env": "ALPACA_API_KEY_PHOTONIC_CPO_ETF",
         "secret_env": "ALPACA_SECRET_KEY_PHOTONIC_CPO_ETF",
         "base_env": "ALPACA_BASE_URL"

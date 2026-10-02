@@ -58,6 +58,8 @@ _TABLE: dict[str, tuple[str, str]] = {
     "col.pl_pct": ("P&L %", "損益 %"),
     "col.day_pl_usd": ("DAY P&L $", "當日損益 $"),
     "col.day_pl_pct": ("DAY P&L %", "當日損益 %"),
+    "col.streak": ("STREAK", "連漲跌"),
+    "col.streak_pct": ("STREAK %", "連累計 %"),
     "col.mkt_val": ("MKT VALUE", "總估值"),
     "col.cost": ("TOTAL COST", "總成本"),
     "col.side": ("SIDE", "方向"),

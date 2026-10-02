@@ -1,7 +1,7 @@
 {
   "version": 3,
-  "last_updated": "2026-09-22",
-  "updated_by": "claude: seeded an anchor fence block, OFF with an empty allow list, so the TUI n-screen reads off/unrestricted for this wallet, 2026-09-22",
+  "last_updated": "2026-10-02",
+  "updated_by": "wanna_buffet: handover baseline: swing buyer off on this wallet (mode is a word, re-set after the coerce fix)",
   "capitol_copier": {
     "trade_size_usd": 1000,
     "max_trade_size_usd": 3000,
@@ -48,20 +48,8 @@
     "stop_loss_pct": 0.08,
     "trail_trigger_pct": 0.5,
     "trail_giveback_pct": 0.25,
-    "take_profit_levels": [
-      [
-        0.25,
-        0.33
-      ],
-      [
-        0.5,
-        0.5
-      ]
-    ],
-    "pyramid_levels": [
-      0.1,
-      0.2
-    ],
+    "take_profit_levels": [],
+    "pyramid_levels": [],
     "pyramid_add_frac": 0.5,
     "prune_off_target": false,
     "max_holdings": 20
@@ -119,7 +107,7 @@
     "trailing_trigger_step_pct": 0.01
   },
   "swing": {
-    "enabled": true,
+    "enabled": false,
     "regime_sma_days": 50,
     "rs_lookback_days": 20,
     "max_new_positions_per_run": 2,
@@ -130,7 +118,8 @@
     "dip_cooldown_days": 7,
     "stop_cooldown_days": 5,
     "min_cash_reserve_usd": 2000,
-    "max_holdings": 20
+    "max_holdings": 20,
+    "mode": "off"
   },
   "trading_schedule": {
     "manage_every_minutes": 20,
@@ -140,32 +129,72 @@
     "weekdays_only": true
   },
   "risk": {
-    "max_position_pct": 0.25,
-    "max_gross_exposure": 2.0,
+    "max_position_pct": 0.2,
+    "max_gross_exposure": 1.0,
     "gross_by_regime": {
-      "bull": 2.0,
-      "neutral": 1.25,
-      "bear": 0.75
+      "bull": 1.0,
+      "neutral": 0.85,
+      "bear": 0.5
     },
     "hedge_by_regime": {
       "bull": 0.0,
       "neutral": 0.05,
-      "bear": 0.15
+      "bear": 0.2
     }
   },
   "isr_alpha": {
     "regime_gate": true
   },
   "anchor": {
-    "enabled": false,
-    "universe": [],
+    "enabled": true,
+    "regime_filter_enabled": true,
+    "block_long_in_bear": true,
+    "inverse_etf_universe": [
+      "SH",
+      "PSQ"
+    ],
+    "universe": [
+      "AAPL",
+      "AMD",
+      "ANET",
+      "ASML",
+      "CRM",
+      "GOOGL",
+      "INTC",
+      "LAZR",
+      "META",
+      "MRVL",
+      "MSFT",
+      "MU",
+      "NOW",
+      "NVDA",
+      "PANW",
+      "PLTR",
+      "QCOM",
+      "SCHD",
+      "SMCI",
+      "AVGO",
+      "COHR",
+      "LITE",
+      "SH",
+      "PSQ"
+    ],
     "entry_window_et": [
       "09:30",
       "11:30"
     ],
     "max_entries_per_name_per_day": 2,
-    "max_entries_per_day": 0,
+    "max_entries_per_day": 4,
     "consecutive_loss_halt": 2,
-    "daily_loss_limit_pct": 3.0
+    "daily_loss_limit_pct": 2.5,
+    "cooling_off_pct": 5.0,
+    "cooling_off_days": 2,
+    "max_open_names": 25,
+    "min_cash_pct": 0.05
+  },
+  "wbauto": {
+    "target_pct_per_quarter": 0.1,
+    "quarter_start": "2026-10-02",
+    "baseline_equity": 92911.3
   }
 }

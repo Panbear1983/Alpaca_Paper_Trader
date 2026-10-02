@@ -197,12 +197,21 @@ def cmd_status() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--wallet", default=None, help="Target wallet name (e.g. 'Photonic CPO ETF')")
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("buy"); b.add_argument("symbol"); b.add_argument("--stop", type=float, required=True)
     b.add_argument("--note", default=""); b.add_argument("--dry-run", action="store_true")
+    b.add_argument("--wallet", default=None, help="Target wallet name (e.g. 'Photonic CPO ETF')")
     s = sub.add_parser("sell"); s.add_argument("symbol"); s.add_argument("--frac", type=float, default=1.0)
-    sub.add_parser("status")
+    s.add_argument("--wallet", default=None, help="Target wallet name (e.g. 'Photonic CPO ETF')")
+    st = sub.add_parser("status")
+    st.add_argument("--wallet", default=None, help="Target wallet name (e.g. 'Photonic CPO ETF')")
     a = ap.parse_args()
+    target_wallet = getattr(a, "wallet", None)
+    if target_wallet:
+        import wallets, strategies
+        wallets.apply(target_wallet)
+        strategies.set_active(target_wallet)
     if a.cmd == "buy":
         return cmd_buy(a.symbol, a.stop, a.note, a.dry_run)
     if a.cmd == "sell":

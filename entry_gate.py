@@ -368,6 +368,21 @@ def check_entry(ticker: str, side: str, notional=None, qty=None, now: dt.datetim
     if paused:
         return False, why, "cooling_off"
 
+    # ── Hierarchical regime filter (opt-in per wallet config) ──
+    if cfg.get("regime_filter_enabled", False):
+        try:
+            import market_context as mc
+            sess = n.date().isoformat() if hasattr(n, "date") else None
+            r_state = mc.regime_state(sess)
+            curr_state = r_state.get("state", "unknown")
+            if curr_state == "bear" and cfg.get("block_long_in_bear", True):
+                inverse_etfs = {s.upper() for s in cfg.get("inverse_etf_universe", ["SH", "PSQ", "SQQQ", "SPDN"])}
+                if sym not in inverse_etfs:
+                    return False, (f"regime: market is in a confirmed bear regime (SPY < 200 SMA) — "
+                                   f"new long entry in {sym} is blocked to preserve capital"), "regime"
+        except Exception as e:
+            return False, f"regime: cannot verify market regime ({e}) — refusing to open blind", "regime"
+
     max_names = int(cfg.get("max_open_names") or 0)
     if max_names:
         try:

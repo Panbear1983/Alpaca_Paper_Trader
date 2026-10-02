@@ -262,7 +262,7 @@
     "enabled": false,
     "rebalance_every_minutes": 10,
     "catalyst_check_every_minutes": 3,
-    "max_positions": 20,
+    "max_positions": 40,
     "max_sector_pct": 0.4,
     "max_gross_leverage": 2.0,
     "base_position_usd": 12500,
@@ -295,7 +295,7 @@
     "regime_checked_at": "2026-08-29T03:45:36"
   },
   "anchor": {
-    "enabled": true,
+    "enabled": false,
     "universe": [
       "MRNA",
       "AAPL",

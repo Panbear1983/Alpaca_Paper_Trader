@@ -94,7 +94,15 @@ def current() -> str:
 
 
 def _spec(name: str) -> dict | None:
-    return _load_block()["accounts"].get(name)
+    accounts = _load_block()["accounts"]
+    if name in accounts:
+        return accounts[name]
+    # Backward compatibility alias
+    if name in ("Photonic CPO ETF", "photonic_cpo_etf") and "Wanna_Buffet Auto Trading" in accounts:
+        return accounts["Wanna_Buffet Auto Trading"]
+    if name in ("Wanna_Buffet Auto Trading", "wanna_buffet_auto_trading") and "Photonic CPO ETF" in accounts:
+        return accounts["Photonic CPO ETF"]
+    return None
 
 
 def missing_envs(name: str) -> list[str]:
