@@ -26,10 +26,10 @@ _TABLE: dict[str, tuple[str, str]] = {
     "app.title": ("Alpaca Paper Trader — Cockpit",
                   "Alpaca 模擬交易 — 操盤艙"),
     "ui.loading": ("loading…", "載入中…"),
-    "ui.search_ph": ("/ search ticker for company bio — e.g. NVDA",
+    "ui.search_ph": ("/ search any ticker: company bio + price chart — e.g. NVDA",
                      "/ 搜尋股票代號查看公司簡介 — 例如 NVDA"),
     "keys.hints": (
-        "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]o[/b] pf-chart   "
+        "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]o[/b]/[b]Esc[/b] wallet-chart   "
         "[b]w[/b] timeframe   [b]v[/b] positions/orders   "
         "[b]g[/b] sched   [b]m[/b] channels   [b]n[/b] strategy   [b]k[/b] wallet   "
         "[b]Shift+W[/b] compare   [b]h[/b] manual   [b]a[/b] arm/disarm   [b]l[/b] 中文   [b]q[/b] quit"
@@ -37,8 +37,8 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
         "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance   "
         "[b]x[/b] cancel order   [b]X[/b] cancel all orders   [b]C[/b] core hold"
-        "   •   [b]/[/b] bio search",
-        "[b]r[/b] 更新   [b]d[/b] 模擬排名   [b]p[/b] 推送報告   [b]o[/b] 投組圖   "
+        "   •   [b]/[/b] bio + chart search",
+        "[b]r[/b] 更新   [b]d[/b] 模擬排名   [b]p[/b] 推送報告   [b]o[/b]/[b]Esc[/b] 投組圖   "
         "[b]w[/b] 時間範圍   [b]v[/b] 持倉/掛單   "
         "[b]g[/b] 排程   [b]m[/b] 頻道   [b]n[/b] 策略設定   [b]k[/b] 錢包   "
         "[b]Shift+W[/b] 錢包比較   [b]h[/b] 手冊   [b]a[/b] 上鎖/解鎖   [b]l[/b] English   [b]q[/b] 離開"
@@ -46,7 +46,7 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[b]f[/b] 全部平倉   [b]t[/b] 盤中執行   [b]c[/b] 國會跟單   "
         "[b]b[/b] 買入   [b]s[/b] 賣出   [b]e[/b] 再平衡   "
         "[b]x[/b] 取消掛單   [b]X[/b] 取消全部掛單   [b]C[/b] 核心持股"
-        "   •   [b]/[/b] 公司簡介搜尋",
+        "   •   [b]/[/b] 簡介＋走勢圖搜尋",
     ),
 
     # ── table columns ─────────────────────────────────────────────────────────
@@ -388,11 +388,12 @@ _TABLE: dict[str, tuple[str, str]] = {
     # ── chart ─────────────────────────────────────────────────────────────────
     "chart.pf": ("PORTFOLIO (equity)", "投資組合（權益）"),
     "chart.holding": ("holding {sym}", "持倉 {sym}"),
+    "chart.research": ("research {label} (not held)", "研究 {label}（未持有）"),
     "log.chart_to": ("[cyan]chart → {where}[/]", "[cyan]圖表 → {where}[/]"),
     "log.chart_tf": ("[cyan]chart timeframe → {rng}[/]",
                      "[cyan]圖表時間範圍 → {rng}[/]"),
-    "chart.select": ("Select a holding (↑/↓), or press 'o' for portfolio",
-                     "請選擇持倉（↑/↓），或按 'o' 檢視投資組合"),
+    "chart.select": ("Select a holding (↑/↓), search a ticker (/), or Esc for the whole wallet",
+                     "請選擇持倉（↑/↓）、搜尋代號（/），或按 Esc 檢視整個錢包"),
     "chart.loading": ("{label} [{rng}] — loading…", "{label} [{rng}] — 載入中…"),
     "chart.nodata": ("{label} [{rng}] — data unavailable",
                      "{label} [{rng}] — 資料無法取得"),

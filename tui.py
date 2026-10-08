@@ -239,6 +239,21 @@ def _code_mtime() -> float:
 
 _TIMEFRAME_KEYS = ["1D", "1W", "1M", "3M", "6M", "1Y"]
 
+PORTFOLIO_SUBJECT = "__PORTFOLIO__"
+
+
+def _resolve_chart_subject(portfolio_mode: bool, search_sym: str, sel_sym: str) -> str:
+    """What the chart shows. Pure, so it is testable without Textual.
+
+    Portfolio mode wins (Escape / 'o'). Otherwise a ticker typed into the
+    search bar beats the holding under the cursor — Peter researches names he
+    does not own, and the chart should follow the bio panel. With neither, the
+    highlighted holding.
+    """
+    if portfolio_mode:
+        return PORTFOLIO_SUBJECT
+    return search_sym or sel_sym
+
 
 # ── Modals ───────────────────────────────────────────────────────────────────
 
@@ -1573,7 +1588,8 @@ class AlpacaTUI(App):
         self._equity: float = 0.0              # account equity from last refresh
         self._tick: int = 0                    # refresh counter
         self._sel_sym: str = ""                # holding the cursor is on
-        self._portfolio_mode: bool = False     # True = chart the whole portfolio (key 'o')
+        self._search_sym: str = ""             # ticker typed into '/' search; chart follows it
+        self._portfolio_mode: bool = False     # True = chart the whole portfolio (key 'o' / Esc)
         self._view_mode: str = "positions"     # "positions" or "orders" (key 'v')
         self._open_orders: list[dict] = []     # last fetched open orders
         self._order_ids: list[str] = []        # order IDs in current table row order
@@ -1785,6 +1801,7 @@ class AlpacaTUI(App):
         self._price.clear()
         self._sel_sym = ""
         self._candles = []
+        self._clear_search()
         self._log(t("log.wallet_switched", name=name))
         if name != wl.default_name():
             self._log(t("log.wallet_engines", name=name))
@@ -1903,19 +1920,48 @@ class AlpacaTUI(App):
         sym = re.sub(r"[^A-Za-z0-9.\-]", "", event.value.strip().upper())
         bio = self.query_one("#bio", Static)
         if not sym:
-            self._bio_sym = ""
-            bio.update("")
+            self._clear_search()
+            self._fetch_and_render()
             return
         bio.update(t("bio.looking", sym=sym))
+        # The chart follows the bio: research this name's candles too, at the
+        # current 'w' range, held or not. Deliberately NOT inside _lookup_bio,
+        # which _apply_language re-runs on every 'l' press.
+        self._search_sym = sym
+        self._portfolio_mode = False
+        self._fetch_and_render()
         self._lookup_bio(sym)
 
+    def _clear_search(self) -> None:
+        """Drop the researched ticker and its bio panel together."""
+        self._search_sym = ""
+        self._bio_sym = ""
+        try:
+            self.query_one("#bio", Static).update("")
+        except Exception:
+            pass
+
     def on_key(self, event: events.Key) -> None:
+        if event.key != "escape":
+            return
         # Escape out of the search box back to the holdings table.
-        if event.key == "escape":
-            inp = self.query_one("#ticker_search", Input)
-            if inp.has_focus:
-                self.query_one("#holdings", DataTable).focus()
-                event.stop()
+        inp = self.query_one("#ticker_search", Input)
+        if inp.has_focus:
+            self.query_one("#holdings", DataTable).focus()
+            event.stop()
+            return
+        # Escape ON the holdings table: deselect, chart the whole wallet.
+        # `self.focused is` not `has_focus` — a modal does not blur the main
+        # screen's widget, so has_focus stays True under a BuyModal and this
+        # would fire from inside it.
+        holdings = self.query_one("#holdings", DataTable)
+        if self.focused is holdings:
+            self._clear_search()
+            if not self._portfolio_mode:
+                self._portfolio_mode = True
+                self._log(t("log.chart_to", where=t("chart.pf")))
+            self._fetch_and_render()
+            event.stop()
 
     @staticmethod
     def _perf_line(perf: dict, price: float = 0.0) -> str:
@@ -1985,7 +2031,7 @@ class AlpacaTUI(App):
     # ── candlestick chart: per-refresh candles of the selected holding, or the
     #    whole portfolio (key 'o'). Each candle = the move over one 8s refresh. ──
     def _chart_subject(self) -> str:
-        return "__PORTFOLIO__" if self._portfolio_mode else self._sel_sym
+        return _resolve_chart_subject(self._portfolio_mode, self._search_sym, self._sel_sym)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         # Only react to the main holdings table — the strategy-config modal has
@@ -1996,14 +2042,23 @@ class AlpacaTUI(App):
         if self._view_mode == "orders":
             return
         sym = str(event.row_key.value) if event.row_key else ""
-        if sym and sym != self._sel_sym:
-            self._sel_sym = sym
-            if not self._portfolio_mode:
-                self._fetch_and_render()        # switch to this symbol's series
+        if not sym:
+            return
+        # Refresh-driven highlights are suppressed in _repopulate_table, so
+        # arriving here means the user moved the cursor: that holding wins over
+        # a searched ticker AND over portfolio mode (Esc / 'o' to go back).
+        changed = (sym != self._sel_sym or self._search_sym or self._portfolio_mode)
+        self._sel_sym = sym
+        if changed:
+            self._clear_search()
+            self._portfolio_mode = False
+            self._fetch_and_render()        # switch to this symbol's series
 
     def action_overview(self) -> None:
         """Toggle: chart the whole portfolio (equity) vs the selected holding."""
         self._portfolio_mode = not self._portfolio_mode
+        if self._portfolio_mode:
+            self._clear_search()
         where = (t("chart.pf") if self._portfolio_mode
                  else t("chart.holding", sym=self._sel_sym or "—"))
         self._log(t("log.chart_to", where=where))
@@ -2031,13 +2086,13 @@ class AlpacaTUI(App):
             if not subj:
                 self.call_from_thread(self._render_candles, [])
                 return
-            if self._portfolio_mode:
+            if subj == PORTFOLIO_SUBJECT:
                 bars = hr.fetch_portfolio_history_ranged(rng)
             else:
                 bars = hr.fetch_bars_ranged(subj, rng)
             self._hist_cache[cache_key] = bars
         # Company full name for the chart title (once per symbol, then cached).
-        if subj and subj != "__PORTFOLIO__" and subj not in self._names:
+        if subj and subj != PORTFOLIO_SUBJECT and subj not in self._names:
             self._names[subj] = fetch_asset_name(subj)
         self.call_from_thread(self._render_candles, self._hist_cache.get(cache_key, []))
 
@@ -2047,14 +2102,16 @@ class AlpacaTUI(App):
         plt.clear_figure()
         subj = self._chart_subject()
         rng = self._chart_range
-        if self._portfolio_mode:
+        if subj == PORTFOLIO_SUBJECT:
             label = t("chart.pf")
         else:
-            label = self._sel_sym or "—"
-            name = self._names.get(self._sel_sym, "")
+            label = subj or "—"
+            name = self._names.get(subj, "")
             if name:                        # "HOOD · Robinhood Markets, Inc."
                 label = f"{label} · {name}"
-        if not self._portfolio_mode and not self._sel_sym:
+            if subj and subj == self._search_sym and subj not in self._syms:
+                label = t("chart.research", label=label)
+        if not subj:
             plt.title(t("chart.select"))
             self._candles = []
             plot.refresh()
@@ -2269,6 +2326,20 @@ class AlpacaTUI(App):
     def _repopulate_table(self) -> None:
         """Re-fill the holdings DataTable from cached data (no column reset)."""
         t = self.query_one("#holdings", DataTable)
+        # clear() + the first add_row make Textual post RowHighlighted for row 0,
+        # and move_cursor posts another — on EVERY 8s refresh. That flipped the
+        # chart to the top holding and back (two fetches) and would wipe a
+        # searched ticker within seconds. Suppress them: a RowHighlighted that
+        # reaches the handler now means the user actually moved the cursor.
+        with t.prevent(DataTable.RowHighlighted):
+            self._repopulate_rows(t)
+        # Boot default: nothing selected yet and nothing else charted → first row.
+        if (self._view_mode == "positions" and not self._sel_sym and self._syms
+                and not self._search_sym and not self._portfolio_mode):
+            self._sel_sym = self._syms[0]
+            self._fetch_and_render()
+
+    def _repopulate_rows(self, t: DataTable) -> None:
         t.clear()
         if self._view_mode == "positions":
             self._syms = []

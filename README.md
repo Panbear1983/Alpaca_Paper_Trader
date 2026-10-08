@@ -287,7 +287,7 @@ State/logs: `~/.local/state/alpaca_tui/`.
 3. **Arm bar** — safety indicator: **green = DISARMED/safe**, **red = ARMED/live**.
 4. **Holdings table** — one row per position, **sorted by P&L** (winners on top): SYM, QTY, AVG, PRICE, P&L $, P&L %. These are your **live paper positions** (pulled from `GET /positions`), not a watchlist. Move the row cursor with ↑/↓ — that row is what `s` sells.
 5. **Bottom half (stacked, full width):**
-   - **Top — candlestick chart:** fetched from Alpaca historical bars for the selected holding, or synthetic equity bars for the whole portfolio. It **follows the selected holding** (move the cursor ↑/↓), press **`o`** to chart the **whole portfolio (equity)**, and press **`w`** to cycle **1D → 1W → 1M → 3M → 6M → 1Y**. **Click a candle** to print its time + price in the log (approximate — terminals don't expose true plot hit-testing).
+   - **Top — candlestick chart:** fetched from Alpaca historical bars for the selected holding (or a ticker typed into `/` search), or synthetic equity bars for the whole portfolio (`o` / `Esc`). It **follows the selected holding** (move the cursor ↑/↓), press **`o`** to chart the **whole portfolio (equity)**, and press **`w`** to cycle **1D → 1W → 1M → 3M → 6M → 1Y**. **Click a candle** to print its time + price in the log (approximate — terminals don't expose true plot hit-testing).
    - **Below — event log:** scrolling refreshes, dry-run output, order confirmations, errors.
 
 The holdings table takes the **top half**; the full-width candlestick chart and log are stacked in the **bottom half**.
@@ -301,7 +301,7 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `r` | Refresh now | — | — |
 | `d` | Dry-run RS ranking (read-only preview of intraday longs) | — | — |
 | `p` | **Push the multi-wallet report** to Telegram now (leaderboard + per-wallet day P&L, movers, and today's buys/sells — same format as the scheduled auto-report; see [Daily Telegram Report](#daily-telegram-report--multi-wallet-wallet_reportpy)) | — | — |
-| `o` | Toggle the chart between the **selected holding** and the **whole portfolio** (equity) | — | — |
+| `o` | Toggle the chart between the **selected holding** and the **whole portfolio** (equity). **`Esc`** on the holdings table does the same thing one-way: deselect and show the whole wallet. Moving the cursor (↑/↓) always returns the chart to that holding | — | — |
 | `w` | Cycle the chart timeframe: **1D → 1W → 1M → 3M → 6M → 1Y** | — | — |
 | `v` | Toggle main table between **POSITIONS** and **OPEN ORDERS** view | — | — |
 | `g` | **Edit the scheduled** auto-report — opens a modal for on/off, time (HH:MM ET), weekdays-only, and channel | — | — |
@@ -321,7 +321,7 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `e` | **Rebalance to top-N** — keep the best N by P&L %, sell the rest, redeploy proceeds; then pick ONE: **deploy idle cash** (buy, ~1x) or **withdraw / raise cash** (trim holdings to a $ target). Each field takes a $ amount or `all`, with a live readout | ✅ | ✅ |
 | `x` | **Cancel** the selected open order (only active in ORDERS view, `v`) | — | ✅ |
 | `X` | **Cancel ALL** open orders (only active in ORDERS view, `v`) | — | ✅ |
-| `/` | **Ticker bio search** — type any symbol below the holdings table for the company profile (FMP), plus **1M / 1Y / ALL price returns** (Alpaca split-adjusted closes; ALL reaches back as far as Alpaca's data, ~2016). In 中文 mode the description is machine-translated (cached per symbol). `Esc` returns to the holdings table | — | — |
+| `/` | **Ticker search** — type any symbol below the holdings table, held or not: the **chart switches to its candles** (at the current `w` timeframe, titled "research … (not held)"), plus the company profile (FMP) and **1M / 1Y / ALL price returns** (Alpaca split-adjusted closes; ALL reaches back as far as Alpaca's data, ~2016). In 中文 mode the description is machine-translated (cached per symbol). `Esc` returns to the holdings table; a second `Esc` clears the search and charts the whole wallet | — | — |
 
 ### Arm / Disarm safety
 
