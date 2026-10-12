@@ -321,7 +321,7 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `e` | **Rebalance to top-N** — keep the best N by P&L %, sell the rest, redeploy proceeds; then pick ONE: **deploy idle cash** (buy, ~1x) or **withdraw / raise cash** (trim holdings to a $ target). Each field takes a $ amount or `all`, with a live readout | ✅ | ✅ |
 | `x` | **Cancel** the selected open order (only active in ORDERS view, `v`) | — | ✅ |
 | `X` | **Cancel ALL** open orders (only active in ORDERS view, `v`) | — | ✅ |
-| `/` | **Ticker search** — type any symbol below the holdings table, held or not: the **chart switches to its candles** (at the current `w` timeframe, titled "research … (not held)"), plus the company profile (FMP) and **1M / 1Y / ALL price returns** (Alpaca split-adjusted closes; ALL reaches back as far as Alpaca's data, ~2016). In 中文 mode the description is machine-translated (cached per symbol). `Esc` returns to the holdings table; a second `Esc` clears the search and charts the whole wallet | — | — |
+| `/` | **Ticker / company search** — type a symbol **or a company name** ("nvidia", "taiwan semiconductor") below the holdings table, held or not; names resolve against Alpaca's tradable list, company first, leveraged funds and warrants ranked down, other matches listed under the bio: the **chart switches to its candles** (at the current `w` timeframe, titled "research … (not held)"), plus the company profile (FMP) and **1M / 1Y / ALL price returns** (Alpaca split-adjusted closes; ALL reaches back as far as Alpaca's data, ~2016). In 中文 mode the description is machine-translated (cached per symbol). `Esc` returns to the holdings table; a second `Esc` clears the search and charts the whole wallet | — | — |
 
 ### Arm / Disarm safety
 

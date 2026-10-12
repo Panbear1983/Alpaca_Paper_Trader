@@ -37,6 +37,7 @@ import datetime as dt
 import json
 import os
 import re
+import time
 import zoneinfo
 
 import requests
@@ -197,6 +198,153 @@ _ASSET_NAME_NOISE = (
     " Common Stock", " Common Shares", " Ordinary Shares",
     " American Depositary Shares", " Depositary Shares",
 )
+
+
+def _clean_asset_name(name: str) -> str:
+    name = (name or "").strip()
+    for noise in _ASSET_NAME_NOISE:
+        if name.endswith(noise):
+            return name[: -len(noise)].rstrip(" ,")
+    return name
+
+
+# ── search by company name ───────────────────────────────────────────────────
+# Alpaca's /assets list (~14k active US equities, ~2s) is the directory the
+# search bar resolves company names against. It is exactly the set of names
+# the dashboard can chart and buy, which FMP's name search is not (it ranks
+# Toronto's NVDA.TO above NVDA). Loaded lazily on the first name search and
+# kept for the session; typing a plain ticker never waits for it.
+_ASSET_DIR: dict = {"t": 0.0, "rows": []}     # rows: [(symbol, clean_name, raw_name)]
+_ASSET_DIR_TTL = 6 * 3600
+_TICKER_SHAPE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,5}$")
+# Words that mark a derivative product rather than the company itself, so
+# "nvidia" ranks NVIDIA Corporation above the 2x-leveraged NVDA funds.
+_DERIVATIVE_WORDS = ("ETF", "ETN", "FUND", "TRUST", "2X", "3X", "-1X", "BULL", "BEAR",
+                     "LEVERAGED", "INVERSE", "DAILY", "WARRANT", "WARRANTS", "UNIT",
+                     "UNITS", "RIGHTS", "PREFERRED", "NOTES", "DEBENTURES")
+
+
+# Brand names that differ from the legal name in Alpaca's directory. "SpaceX"
+# is "Space Exploration Technologies Corp." there, so typing the brand would
+# otherwise land on a SpaceX-themed leveraged fund. Checked AFTER a real
+# ticker match (so "META" the ticker still wins) and BEFORE the name search.
+# Keys are compared with spaces/punctuation stripped: "coca-cola" == "coca cola".
+_BRAND_ALIASES = {
+    "spacex": "SPCX",
+    "google": "GOOGL", "alphabet": "GOOGL", "youtube": "GOOGL",
+    "facebook": "META", "instagram": "META", "whatsapp": "META",
+    "tsmc": "TSM",
+    "cocacola": "KO", "coke": "KO",
+    "pepsi": "PEP",
+    "berkshire": "BRK.B", "berkshirehathaway": "BRK.B",
+    "alibaba": "BABA",
+    "nintendo": "NTDOY",
+    "robinhood": "HOOD",
+    "chatgpt": "", "openai": "",          # not listed: resolve to "no match", not a lookalike
+}
+
+
+def _alias_lookup(query: str) -> str | None:
+    """Ticker for a known brand nickname, '' for a known-unlisted brand, or
+    None when the alias table has no opinion."""
+    key = re.sub(r"[^a-z0-9]", "", query.lower())
+    return _BRAND_ALIASES.get(key)
+
+
+def _asset_directory(force: bool = False) -> list[tuple[str, str, str]]:
+    """The tradable US-equity directory, cached for the session. [] on failure."""
+    now = time.time()
+    if not force and _ASSET_DIR["rows"] and now - _ASSET_DIR["t"] < _ASSET_DIR_TTL:
+        return _ASSET_DIR["rows"]
+    try:
+        r = requests.get(f"{hr.ALPACA_BASE}/assets", headers=hr.HEADERS,
+                         params={"status": "active", "asset_class": "us_equity"},
+                         timeout=30)
+        r.raise_for_status()
+        rows = [(a["symbol"].upper(), _clean_asset_name(a.get("name", "")), a.get("name", ""))
+                for a in r.json() if a.get("tradable") and a.get("symbol")]
+        if rows:
+            _ASSET_DIR.update({"t": now, "rows": rows})
+    except Exception:
+        pass
+    return _ASSET_DIR["rows"]
+
+
+def rank_name_matches(query: str, rows: list[tuple[str, str, str]],
+                      limit: int = 5) -> list[tuple[str, str]]:
+    """Companies whose name matches *query*, best first: [(symbol, clean_name)].
+
+    Pure, so it is unit-testable. Scoring, high to low: exact name; name
+    starts with the query; every query word appears in the name; the query
+    appears anywhere. Within a tier a shorter name wins ("Apple Inc" over
+    "Apple Hospitality REIT") and derivative products (ETFs, 2x funds,
+    warrants, preferreds) are pushed down so the company itself comes first.
+    """
+    q = " ".join(query.lower().split())
+    if not q:
+        return []
+    words = q.split()
+    scored = []
+    for sym, clean, raw in rows:
+        n = clean.lower()
+        if not n:
+            continue
+        if n == q:
+            tier = 4
+        elif n.startswith(q):
+            tier = 3
+        elif all(w in n for w in words):
+            tier = 2
+        elif q in n:
+            tier = 1
+        else:
+            continue
+        up = raw.upper()
+        deriv = any(w in up.split() or w in up for w in _DERIVATIVE_WORDS)
+        scored.append((tier, not deriv, -len(clean), sym, clean))
+    scored.sort(reverse=True)
+    return [(s, c) for _, _, _, s, c in scored[:limit]]
+
+
+def resolve_search(query: str) -> tuple[str, str, list[tuple[str, str]]]:
+    """What the user meant: (symbol, clean_name, alternatives).
+
+    A ticker typed as a ticker resolves at once — it is only checked against
+    the directory when the directory is already loaded, so the first search
+    of a session never waits for the 2s download. Anything else is treated as
+    a company name. ('', '', []) when nothing matches.
+    """
+    raw = " ".join(query.strip().split())
+    if not raw:
+        return "", "", []
+    token = re.sub(r"[^A-Za-z0-9.\-]", "", raw.upper())
+    ticker_shaped = " " not in raw and bool(_TICKER_SHAPE.match(token))
+    rows = _ASSET_DIR["rows"] if ticker_shaped else _asset_directory()
+    alias = _alias_lookup(raw)
+    if ticker_shaped:
+        if not rows:
+            # Directory not loaded. A six-letter brand ("SpaceX") is ticker-
+            # shaped too, so ask the alias table before trusting the token.
+            if alias is None:
+                return token, "", []
+        else:
+            for sym, clean, _ in rows:
+                if sym == token:
+                    return sym, clean, []   # a real ticker beats any alias
+    if alias is not None:
+        if not alias:
+            return "", "", []               # known brand, not a listed stock
+        name = next((c for s, c, _ in (rows or _asset_directory()) if s == alias), "")
+        return alias, name, []
+    if not rows:
+        rows = _asset_directory()
+    if not rows:
+        return (token, "", []) if ticker_shaped else ("", "", [])
+    matches = rank_name_matches(raw, rows)
+    if not matches:
+        return (token, "", []) if ticker_shaped else ("", "", [])
+    sym, clean = matches[0]
+    return sym, clean, matches[1:]
 
 
 def fetch_asset_name(symbol: str) -> str:
@@ -1589,6 +1737,7 @@ class AlpacaTUI(App):
         self._tick: int = 0                    # refresh counter
         self._sel_sym: str = ""                # holding the cursor is on
         self._search_sym: str = ""             # ticker typed into '/' search; chart follows it
+        self._search_alts: list[tuple[str, str]] = []  # other companies the name also matched
         self._portfolio_mode: bool = False     # True = chart the whole portfolio (key 'o' / Esc)
         self._view_mode: str = "positions"     # "positions" or "orders" (key 'v')
         self._open_orders: list[dict] = []     # last fetched open orders
@@ -1917,17 +2066,36 @@ class AlpacaTUI(App):
         # handle their own submits on their own screens).
         if event.input.id != "ticker_search":
             return
-        sym = re.sub(r"[^A-Za-z0-9.\-]", "", event.value.strip().upper())
+        query = " ".join(event.value.strip().split())
         bio = self.query_one("#bio", Static)
-        if not sym:
+        if not query:
             self._clear_search()
             self._fetch_and_render()
             return
-        bio.update(t("bio.looking", sym=sym))
-        # The chart follows the bio: research this name's candles too, at the
-        # current 'w' range, held or not. Deliberately NOT inside _lookup_bio,
-        # which _apply_language re-runs on every 'l' press.
+        bio.update(t("bio.looking", sym=query))
+        self._resolve_search(query)
+
+    @work(thread=True, exclusive=True, group="ticker_resolve")
+    def _resolve_search(self, query: str) -> None:
+        """Ticker or company name → symbol, off-thread (may load the directory)."""
+        sym, name, alts = resolve_search(query)
+        if not sym:
+            self.call_from_thread(self.query_one("#bio", Static).update,
+                                  t("bio.nomatch", query=query))
+            return
+        self.call_from_thread(self._start_search, query, sym, name, alts)
+
+    def _start_search(self, query: str, sym: str, name: str,
+                      alts: list[tuple[str, str]]) -> None:
+        """Main-thread: point the chart and the bio at the resolved symbol.
+        The chart follows the bio: research this name's candles too, at the
+        current 'w' range, held or not. Deliberately NOT inside _lookup_bio,
+        which _apply_language re-runs on every 'l' press."""
+        if query.upper() != sym:
+            self.query_one("#bio", Static).update(
+                t("bio.resolved", query=query, sym=sym, name=name))
         self._search_sym = sym
+        self._search_alts = alts
         self._portfolio_mode = False
         self._fetch_and_render()
         self._lookup_bio(sym)
@@ -1935,6 +2103,7 @@ class AlpacaTUI(App):
     def _clear_search(self) -> None:
         """Drop the researched ticker and its bio panel together."""
         self._search_sym = ""
+        self._search_alts = []
         self._bio_sym = ""
         try:
             self.query_one("#bio", Static).update("")
@@ -2026,6 +2195,9 @@ class AlpacaTUI(App):
                 text = f"{first}\n{perf_line}\n{rest}"
             else:
                 text = f"{text}\n{perf_line}"
+        if self._search_alts and symbol == self._search_sym:
+            text += "\n" + t("bio.also", alts="  ".join(
+                f"{s} {n}" for s, n in self._search_alts[:4]))
         self.call_from_thread(self.query_one("#bio", Static).update, text)
 
     # ── candlestick chart: per-refresh candles of the selected holding, or the

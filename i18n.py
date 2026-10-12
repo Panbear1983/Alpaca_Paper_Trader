@@ -26,7 +26,7 @@ _TABLE: dict[str, tuple[str, str]] = {
     "app.title": ("Alpaca Paper Trader — Cockpit",
                   "Alpaca 模擬交易 — 操盤艙"),
     "ui.loading": ("loading…", "載入中…"),
-    "ui.search_ph": ("/ search any ticker: company bio + price chart — e.g. NVDA",
+    "ui.search_ph": ("/ search a ticker or company name: bio + price chart — e.g. NVDA, nvidia",
                      "/ 搜尋股票代號查看公司簡介 — 例如 NVDA"),
     "keys.hints": (
         "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]o[/b]/[b]Esc[/b] wallet-chart   "
@@ -378,6 +378,11 @@ _TABLE: dict[str, tuple[str, str]] = {
     "bio.no_key": ("[yellow]FMP_API_KEY not set in .env — cannot fetch company bio.[/]",
                    "[yellow].env 未設定 FMP_API_KEY — 無法取得公司簡介。[/]"),
     "bio.looking": ("[dim]looking up {sym}…[/]", "[dim]查詢 {sym} 中…[/]"),
+    "bio.resolved": ("[dim]{query} → [b]{sym}[/] {name} — looking up…[/]",
+                     "[dim]{query} → [b]{sym}[/] {name} — 查詢中…[/]"),
+    "bio.nomatch": ("[dim]No ticker or company matches '{query}'.[/]",
+                    "[dim]找不到符合「{query}」的代號或公司。[/]"),
+    "bio.also": ("[dim]also matched: {alts}[/]", "[dim]其他符合：{alts}[/]"),
     "bio.none": ("[dim]No profile found for {sym}.[/]",
                  "[dim]找不到 {sym} 的公司資料。[/]"),
     "bio.nodesc": ("[dim](no description available)[/]", "[dim]（無公司描述）[/]"),
