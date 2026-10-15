@@ -32,7 +32,7 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[b]r[/b] refresh   [b]d[/b] dry-run   [b]p[/b] report   [b]o[/b]/[b]Esc[/b] wallet-chart   "
         "[b]w[/b] timeframe   [b]v[/b] positions/orders   "
         "[b]g[/b] sched   [b]m[/b] channels   [b]n[/b] strategy   [b]k[/b] wallet   "
-        "[b]Shift+W[/b] compare   [b]h[/b] manual   [b]a[/b] arm/disarm   [b]l[/b] 中文   [b]q[/b] quit"
+        "[b]Shift+W[/b] compare   [b]Shift+S[/b] scoreboard   [b]h[/b] manual   [b]a[/b] arm/disarm   [b]l[/b] 中文   [b]q[/b] quit"
         "   •   "
         "[b]f[/b] flatten   [b]t[/b] tick   [b]c[/b] capitol   "
         "[b]b[/b] buy   [b]s[/b] sell   [b]e[/b] rebalance   "
@@ -41,7 +41,7 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[b]r[/b] 更新   [b]d[/b] 模擬排名   [b]p[/b] 推送報告   [b]o[/b]/[b]Esc[/b] 投組圖   "
         "[b]w[/b] 時間範圍   [b]v[/b] 持倉/掛單   "
         "[b]g[/b] 排程   [b]m[/b] 頻道   [b]n[/b] 策略設定   [b]k[/b] 錢包   "
-        "[b]Shift+W[/b] 錢包比較   [b]h[/b] 手冊   [b]a[/b] 上鎖/解鎖   [b]l[/b] English   [b]q[/b] 離開"
+        "[b]Shift+W[/b] 錢包比較   [b]Shift+S[/b] 記分板   [b]h[/b] 手冊   [b]a[/b] 上鎖/解鎖   [b]l[/b] English   [b]q[/b] 離開"
         "   •   "
         "[b]f[/b] 全部平倉   [b]t[/b] 盤中執行   [b]c[/b] 國會跟單   "
         "[b]b[/b] 買入   [b]s[/b] 賣出   [b]e[/b] 再平衡   "
@@ -571,6 +571,53 @@ _TABLE: dict[str, tuple[str, str]] = {
     "log.reb_plan_err": ("[red]rebalance plan error: {e}[/]",
                          "[red]再平衡規劃錯誤：{e}[/]"),
     "log.reb_err": ("[red]rebalance error: {e}[/]", "[red]再平衡錯誤：{e}[/]"),
+    # ── Scoreboard Multiples (Shift+S, scoreboard.py) ─────────────────────────
+    "sb.title": ("Scoreboard Multiples", "多帳戶每日記分板"),
+    "sb.window": ("last {n} sessions", "最近 {n} 個交易日"),
+    "sb.scale": ("█ = {step}% (max {cap} = {top}%+)", "█ = {step}%（最多 {cap} 格 = {top}% 以上）"),
+    "sb.read_only": ("read-only", "唯讀"),
+    "sb.date": ("DATE", "日期"),
+    "sb.weekdays": ("Mon Tue Wed Thu Fri Sat Sun", "週一 週二 週三 週四 週五 週六 週日"),
+    "sb.missing": ("missing", "缺"),
+    "sb.fetching": ("fetching all accounts…", "讀取所有帳戶中…"),
+    "sb.updated": ("updated {t} · auto-refresh 60s", "更新於 {t} · 每 60 秒自動更新"),
+    "sb.keys": ("w: window (10 / 30 / 60 sessions) · ↑/↓ PgUp/PgDn: scroll · r: refresh · Esc: close · "
+                "trade keys disabled here",
+                "w：範圍（10／30／60 個交易日）· ↑/↓ PgUp/PgDn：捲動 · r：更新 · Esc：關閉 · 此頁停用交易鍵"),
+    "sb.live": ("live", "即時"),
+    "sb.after": ("after-hours", "盤後"),
+    "sb.note.live": ("live: today's row uses current values and keeps moving until the close",
+                     "即時：今日數值為目前值，收盤前仍會變動"),
+    "sb.note.after": (
+        "after-hours: today's row uses current values, not the official close; Alpaca posts the close by the next morning",
+        "盤後：今日數值為目前值而非正式收盤值；Alpaca 通常於隔天早上公布收盤值"),
+    "sb.f_days": ("up/down/flat", "漲／跌／平"),
+    "sb.f_won": ("$ on up days", "上漲日賺"),
+    "sb.f_lost": ("$ on down days", "下跌日賠"),
+    "sb.f_diff": ("difference", "相差"),
+    "sb.f_net": ("net, compounded", "淨變動（複利）"),
+    "sb.f_best": ("best day", "最佳單日"),
+    "sb.f_worst": ("worst day", "最差單日"),
+    "sb.note.dot": ("· = flat (no change, e.g. all cash) or missing",
+                    "· = 持平（無變動，例如全為現金）或缺資料"),
+    "sb.note.transfer": (
+        "* deposit or withdrawal in that change: the dollars are Alpaca's own trading P&L, not the raw value change",
+        "* 該變動含入金或出金：金額採 Alpaca 自身的交易損益，而非帳戶價值的直接差額"),
+    "sb.note.estimate": (
+        "~ estimate: Robinhood's close was read more than 30 minutes after the bell, or not after it at all",
+        "~ 估計值：Robinhood 收盤值在收盤 30 分鐘後才讀取，或收盤後未讀取"),
+    "sb.note.span": (
+        "2d, 3d: the change covers that many sessions because the ones before it are missing",
+        "2d、3d：前面的交易日缺資料，此變動涵蓋相應天數"),
+    "sb.note.gap": (
+        "Alpaca data gap on {days}: every wallet shows exactly no change, so the day is shown as missing",
+        "Alpaca 資料缺漏（{days}）：所有錢包皆完全無變動，因此視為缺資料"),
+    "sb.note.rh": (
+        "Robinhood: built from the dashboard's own reads (since {first}); values include after-hours prices, "
+        "and deposits or withdrawals can't be detected",
+        "Robinhood：依儀表板自身的讀取紀錄（自 {first} 起）；數值含盤後價格，且無法偵測入金或出金"),
+    "sb.note.err": ("{name}: {err}", "{name}：{err}"),
+    "sb.note.no_sessions": ("no trading sessions found", "找不到交易日"),
 }
 
 STRINGS: dict[str, dict[str, str]] = {

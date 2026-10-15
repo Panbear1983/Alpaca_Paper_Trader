@@ -49,6 +49,7 @@ from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
@@ -72,6 +73,7 @@ import i18n
 from i18n import t
 import price_streaks as ps
 import robinhood_view as rhv
+import scoreboard as sb
 
 try:
     import telegram_notifier as tg
@@ -1660,6 +1662,166 @@ class CompareScreen(ModalScreen[None]):
         return "\n".join(lines)
 
 
+class ScoreboardScreen(ModalScreen[None]):
+    """Scoreboard Multiples (key 'S') — every account's daily change side by
+    side, one row per trading session, newest at the top, with up/down
+    totals underneath. Strictly READ-ONLY: scoreboard.py reads the Alpaca
+    wallets with per-request credentials (GET only) and Robinhood only from
+    the reader's saved history, so opening this never starts a Robinhood read
+    and can't place orders — no ARM gate needed."""
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("w", "cycle_window", "Window"),
+        ("r", "refetch", "Refresh"),
+    ]
+
+    # Same rationale as CompareScreen: swallow everything except scrolling and
+    # this screen's own keys, so trading keys can't reach the app while open.
+    _PASS_KEYS = {"up", "down", "pageup", "pagedown", "home", "end",
+                  "escape", "tab", "shift+tab", "w", "r"}
+
+    def __init__(self):
+        super().__init__()
+        self._window: int = sb.DEFAULT_WINDOW
+        self._raw: dict | None = None          # last gather(); w re-slices it
+        self._as_of: str = ""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="sb_dialog"):
+            yield Label("", id="sb_hint")
+            yield DataTable(id="sb_table", cursor_type="none", zebra_stripes=True)
+            yield Static("", id="sb_notes")
+
+    def on_mount(self) -> None:
+        self.query_one("#sb_table", DataTable).focus()   # ↑/↓ PgUp/PgDn scroll it
+        self._set_hint(loading=True)
+        self._fetch()
+        # LIVE page: re-pull every 60s while open (exclusive worker, so slow
+        # fetches never stack).
+        self.set_interval(60, self._fetch)
+
+    def _set_hint(self, loading: bool = False) -> None:
+        state = (f"[yellow]{t('sb.fetching')}[/]" if loading else
+                 f"[green]{t('sb.updated', t=self._as_of)}[/]" if self._as_of else "")
+        scale = t("sb.scale", step=f"{sb.BAR_STEP_PCT:g}", cap=sb.BAR_CAP,
+                  top=f"{sb.BAR_STEP_PCT * sb.BAR_CAP:g}")
+        self.query_one("#sb_hint", Label).update(
+            f"[b]{t('sb.title')}[/]   {t('sb.window', n=self._window)}   {scale}   "
+            f"[dim]{t('sb.read_only')}[/]   {state}\n[dim]{t('sb.keys')}[/]")
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key not in self._PASS_KEYS:
+            event.stop()
+            event.prevent_default()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def action_cycle_window(self) -> None:
+        wins = sb.WINDOWS
+        self._window = wins[(wins.index(self._window) + 1) % len(wins)]
+        if self._raw is None:
+            self._set_hint(loading=True)
+            return
+        self._set_hint()
+        self._populate()                        # same data, new slice: instant
+
+    def action_refetch(self) -> None:
+        self._set_hint(loading=True)
+        self._fetch()
+
+    @work(thread=True, exclusive=True, group="sb_fetch")
+    def _fetch(self) -> None:
+        try:
+            raw = sb.gather()                   # never raises; belt and braces
+        except Exception as e:
+            raw = {"now": dt.datetime.now(dt.timezone.utc), "error": str(e)[:80]}
+        self.app.call_from_thread(self._got, raw)
+
+    def _got(self, raw: dict) -> None:
+        if not self.is_attached:                # closed while fetching
+            return
+        self._raw = raw
+        self._as_of = f"{dt.datetime.now():%H:%M:%S}"
+        self._set_hint()
+        self._populate()
+
+    # ── rendering ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _cell(c: dict) -> Text:
+        if c["state"] in ("up", "down"):
+            col = sb.cell_colour(c["state"])
+            n = sb.bar_blocks(c["pct"])
+            txt = Text(f"{c['pct']:+.2f}%".rjust(7) + " " + "█" * n + " " * (sb.BAR_CAP - n),
+                       style=col)
+        else:
+            txt = Text("·".rjust(7) + " " * (sb.BAR_CAP + 1), style="grey50")
+        if c["marks"]:
+            txt.append(" " + " ".join(c["marks"]), style="yellow")
+        return txt
+
+    @staticmethod
+    def _signed(x: float | None, money: bool = False) -> Text:
+        if x is None:
+            return Text("—", style="grey50")
+        s = f"{'-' if x < 0 else '+'}${abs(x):,.0f}" if money else f"{x:+.2f}%"
+        return Text(s, style="green" if x > 0 else "red" if x < 0 else "grey50")
+
+    def _days(self, f: dict) -> Text:
+        txt = Text.assemble((f"{f['up']}↑", "green"), " ", (f"{f['down']}↓", "red"),
+                            " ", (f"{f['flat']}·", "grey50"))
+        if f["missing"]:
+            txt.append(f"  {f['missing']} {t('sb.missing')}", style="yellow")
+        return txt
+
+    def _populate(self) -> None:
+        if self._raw is None:
+            return
+        table = sb.table_from(self._raw, self._window)
+        try:
+            tbl = self.query_one("#sb_table", DataTable)
+            notes = self.query_one("#sb_notes", Static)
+        except NoMatches:
+            return
+        keep_y = tbl.scroll_y
+        tbl.clear(columns=True)
+        tbl.add_column(t("sb.date"), key="date")
+        for i, col in enumerate(table["columns"]):
+            tbl.add_column(Text(col["name"], style="b" if col["ok"] else "b yellow"),
+                           key=f"c{i}")
+        labels = {"live": (t("sb.live"), "b green"), "after": (t("sb.after"), "yellow")}
+        for row in table["rows"]:
+            head = Text(sb.day_text(row["day"]))
+            if row["label"] in labels:
+                word, style = labels[row["label"]]
+                head.append(f" {word}", style=style)
+            tbl.add_row(head, *(self._cell(c) for c in row["cells"]))
+        if table["rows"]:
+            n = len(table["columns"])
+            foot = [
+                (t("sb.f_days"), self._days),
+                (t("sb.f_won"), lambda f: self._signed(f["won"], money=True)),
+                (t("sb.f_lost"), lambda f: self._signed(f["lost"], money=True)),
+                (t("sb.f_diff"), lambda f: self._signed(f["diff"], money=True)),
+                (t("sb.f_net"), lambda f: self._signed(f["net_pct"])),
+                (t("sb.f_best"), lambda f: self._signed(f["best"])),
+                (t("sb.f_worst"), lambda f: self._signed(f["worst"])),
+            ]
+            tbl.add_row(*([Text("")] * (n + 1)))
+            for label, fn in foot:
+                tbl.add_row(Text(label, style="b"), *(fn(f) for f in table["totals"]))
+        lines = Text()
+        for key, params in table["notes"]:
+            if lines:
+                lines.append("\n")
+            lines.append(t(key, **params),
+                         style="yellow" if key == "sb.note.err" else "dim")
+        notes.update(lines)
+        self.call_after_refresh(tbl.scroll_to, y=keep_y, animate=False)
+
+
 class CandlePlot(PlotextPlot):
     """PlotextPlot that reports the x-column of a click so the app can map it to
     the nearest candle (terminals don't expose true plot hit-testing)."""
@@ -1695,7 +1857,7 @@ class AlpacaTUI(App):
         background: $panel;
         color: $text-muted;
     }
-    ConfirmModal, BuyModal, EditFieldModal, StrategyConfigModal, ManualModal, WalletModal, RenameWalletModal, CompareScreen { align: center middle; }
+    ConfirmModal, BuyModal, EditFieldModal, StrategyConfigModal, ManualModal, WalletModal, RenameWalletModal, CompareScreen, ScoreboardScreen { align: center middle; }
     #cmp_dialog { width: 96%; height: 96%; padding: 1 2; background: $surface; border: thick $accent; }
     #cmp_hint { height: auto; }
     #cmp_scroll { height: 1fr; }
@@ -1704,6 +1866,10 @@ class AlpacaTUI(App):
     .cmp-chart { height: 16; border: solid $accent; }
     .cmp-head { height: auto; padding: 1 0 0 0; }
     .cmp-bars { height: auto; padding: 0 1; }
+    #sb_dialog { width: 96%; height: 96%; padding: 1 2; background: $surface; border: thick $accent; }
+    #sb_hint { height: auto; }
+    #sb_table { height: 1fr; }
+    #sb_notes { height: auto; max-height: 9; padding: 1 0 0 0; }
     #wallet_dialog { width: 72; height: auto; padding: 1 2; background: $surface; border: thick $accent; }
     #wallettable { height: auto; }
     #dialog { width: 64; height: auto; padding: 1 2; background: $surface; border: thick $accent; }
@@ -1729,6 +1895,7 @@ class AlpacaTUI(App):
         Binding("n", "edit_strategy", "Strategy cfg"),
         Binding("k", "switch_wallet", "Wallet"),
         Binding("W", "compare_wallets", "Compare wallets"),
+        Binding("S", "scoreboard", "Scoreboard"),
         Binding("l", "toggle_language", "語言/Language"),
         Binding("h", "open_manual", "Manual"),
         Binding("a", "arm", "Arm/Disarm"),
@@ -2063,6 +2230,11 @@ class AlpacaTUI(App):
     def action_compare_wallets(self) -> None:
         """Side-by-side performance of every configured wallet (read-only)."""
         self.push_screen(CompareScreen())
+
+    def action_scoreboard(self) -> None:
+        """Scoreboard Multiples: every account's daily change, side by side
+        (read-only; never starts a Robinhood read)."""
+        self.push_screen(ScoreboardScreen())
 
     # ── language toggle (l) — English ⇄ 繁體中文, persisted ────────────────────
     def action_toggle_language(self) -> None:
