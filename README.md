@@ -307,7 +307,7 @@ Data auto-refreshes every **8 seconds** (or `r` to force it).
 | `g` | **Edit the scheduled** auto-report — opens a modal for on/off, time (HH:MM ET), weekdays-only, and channel | — | — |
 | `m` | **Edit Telegram channels** — set the default channel or add a channel (config only; chat-ID/token values stay in `.env`) | — | — |
 | `n` | **Strategy config editor** — browse and edit the **active wallet's** 32 trading tunables (each wallet owns a standalone `strategy_<slug>.json`; the header names which file you're editing). Switch wallets with `k` to edit the other book's strategy. See [Strategy Config Editor](#strategy-config-editor-n) and `PER_WALLET_STRATEGY_PLAN.md`. | — | per-field |
-| `k` | **Switch wallet** — pick which Alpaca paper account the TUI views and manually acts on. Also switches which wallet's strategy file `n` edits. Autonomous engines run per wallet, each gated by its own strategy file's master switches. Inside the picker: `e` renames a wallet, **`a` adds a NEW wallet** (paste its API key + secret — validated live against `/v2/account` before anything is saved; keys go to `.env`, a strategy file is created with every engine OFF, and the account number + equity are shown so a wrong-account keypair is caught immediately) | — | — |
+| `k` | **Switch wallet** — pick which Alpaca paper account the TUI views and manually acts on. The last row, **Robinhood (main)**, is a view-only window on the real Robinhood main account — see [Robinhood main account](#robinhood-main-account-view-only). Also switches which wallet's strategy file `n` edits. Autonomous engines run per wallet, each gated by its own strategy file's master switches. Inside the picker: `e` renames a wallet, **`a` adds a NEW wallet** (paste its API key + secret — validated live against `/v2/account` before anything is saved; keys go to `.env`, a strategy file is created with every engine OFF, and the account number + equity are shown so a wrong-account keypair is caught immediately) | — | — |
 | `Shift+W` | **Compare wallets** — read-only scrollable page: leaderboard ranked against the fixed `$100k` paper-account baseline, all-wallets normalized equity overlay, then each wallet's equity curve + top-down payout breakdown (every position, biggest P&L first). Windows: **1D 1W 1M 3M 6M 1Y 3Y ALL** control chart scope — press `1`-`8` to jump or `w` to cycle; `r` refetches, ↑/↓ PgUp/PgDn scroll. Trade keys are disabled while open | — | — |
 | `h` | **In-app manual** — this README, rendered inside the TUI with a navigable topic index. See [In-App Manual](#in-app-manual-h) below. | — | — |
 | `a` | Arm / Disarm toggle | — | — |
@@ -331,6 +331,18 @@ The cockpit boots **DISARMED** (read-only). Every account-mutating key (`f` `t` 
 2. **Confirm modal** — even when armed, each action pops a Yes/No dialog showing exactly what it will do (`y`/Enter = Yes, `n`/Esc = No).
 
 So nothing executes until you've deliberately armed *and* confirmed. Press `a` again to disarm.
+
+### Robinhood main account (view only)
+
+The wallet picker (`k`) has one extra row, **Robinhood (main)**. It shows Peter's real Robinhood main account — holdings, account value, cash, buying power, day P&L and unrealized P&L — in the same table and chart as the paper wallets. The Roth IRA and the "Agentic" account are deliberately left out.
+
+**View only, enforced three ways.** On this wallet `a` (arm) is refused, every order key (`b` `s` `f` `t` `c` `e` `x` `X`) is refused even if armed, and `n`, `v` and `C` are off. The reader itself can only call Robinhood's five read tools; every place / cancel / review tool is blocked on its command line. Trading the Agentic account is a later stage with its own sign-off.
+
+**Where the numbers come from.** Robinhood issues no API keys; its data is reachable only through the Robinhood connector on Peter's Claude account. `robinhood_view.py` runs a short headless Claude Code read (cheapest model, no user hooks — so no read-aloud — and no saved chat) and keeps Robinhood's own answers, never the model's retyping. Prices count after-hours trades, like Robinhood's app. Between reads, while the market is open, prices tick every 8 s from Alpaca's live feed.
+
+**When it reads.** Every 5 minutes while the market is open, once right after the close, then every 12 hours; `r` on the Robinhood wallet reads now (about 15 s). The dashboard does this itself — no extra scheduled job — so it reads only while the dashboard is running, the Mac is awake and Claude Code is logged in. The freshness line under the summary says when it last read; a red banner appears if the market is open and the last good read is over 15 minutes old. A failed read keeps the last good numbers on screen and says why.
+
+**Settings** live in `strategy_config.json` → `robinhood_view` (`enabled`, `read_every_minutes`, `closed_every_hours`, `stale_warn_minutes`). Data is kept outside the repo in `~/.robinhood_view/` (owner-only): `snapshot.json`, `status.json`, and `history.jsonl`, which builds the account-value chart (`o` / `Esc`) one read at a time — Robinhood offers no account-value history. Check from a shell with `venv/bin/python robinhood_view.py show` (or `read` to read now).
 
 ---
 

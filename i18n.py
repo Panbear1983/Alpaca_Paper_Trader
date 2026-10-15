@@ -81,6 +81,24 @@ _TABLE: dict[str, tuple[str, str]] = {
         "總損益 [{tpc}]{totalpl} ({totalpct}%)[/]   "
         "曝險 [b]{lev}x[/]",
     ),
+    "sum.rh_line": (
+        "Value [b]${value}[/]   Stocks ${stocks}   Cash ${cash}   "
+        "Buying power ${bp}   DayP&L [{pc}]{daypl} ({daypct}%)[/]   "
+        "Unrealized [{uc}]{upl} ({uplpct}%)[/]",
+        "帳戶價值 [b]${value}[/]   持股 ${stocks}   現金 ${cash}   "
+        "購買力 ${bp}   日損益 [{pc}]{daypl} ({daypct}%)[/]   "
+        "未實現 [{uc}]{upl} ({uplpct}%)[/]"),
+    "rh.badge": ("[b white on dark_green] Robinhood ••{last4} · VIEW ONLY [/]",
+                 "[b white on dark_green] Robinhood ••{last4} · 僅檢視 [/]"),
+    "rh.fresh": ("[dim]Robinhood read {age} ago · read every {every} min while the market is open{live}[/]",
+                 "[dim]Robinhood {age} 前讀取 · 開盤時每 {every} 分鐘讀取{live}[/]"),
+    "rh.live": (" · prices between reads from Alpaca's live feed",
+                " · 讀取之間的價格來自 Alpaca 即時報價"),
+    "rh.stale": ("[b white on red] Robinhood not read for {age} [/] [red]{err}[/]",
+                 "[b white on red] Robinhood 已 {age} 未讀取 [/] [red]{err}[/]"),
+    "rh.lasterr": ("[yellow]last read failed: {err}[/]", "[yellow]上次讀取失敗：{err}[/]"),
+    "rh.none": ("[yellow]Robinhood has not been read yet — reading now (about 15 seconds)…[/]",
+                "[yellow]尚未讀取 Robinhood — 正在讀取（約 15 秒）…[/]"),
     "sum.split": ("[dim]Realized[/] [{rc}]{rpl}[/] [dim]· Unrealized[/] [{uc}]{upl}[/]",
                   "[dim]已實現[/] [{rc}]{rpl}[/] [dim]· 未實現[/] [{uc}]{upl}[/]"),
     "badge.market_open": ("[b black on green] MARKET OPEN [/]",
@@ -279,6 +297,11 @@ _TABLE: dict[str, tuple[str, str]] = {
     "wal.err_not_configured": (
         "[red]'{name}' not configured — add {miss} to .env, then reopen[/]",
         "[red]'{name}' 尚未設定 — 請在 .env 加入 {miss} 後重新開啟[/]"),
+    "wal.rh_name": ("Robinhood (main)", "Robinhood（主帳戶）"),
+    "wal.rh_view_only": ("view only", "僅檢視"),
+    "wal.rh_active": ("active · view only", "使用中 · 僅檢視"),
+    "wal.rh_no_rename": ("[yellow]The Robinhood row can't be renamed here[/]",
+                         "[yellow]Robinhood 這一列無法在此重新命名[/]"),
     "wren.title": ("Rename wallet [b]{name}[/]\n"
                    "[dim]Display label only — credentials/.env are unchanged.[/]",
                    "重新命名錢包 [b]{name}[/]\n"
@@ -360,6 +383,23 @@ _TABLE: dict[str, tuple[str, str]] = {
         "[yellow]⚠ 自動引擎依各錢包自己的策略檔運作 — '{name}' 僅在其主開關"
         "開啟時才會自動交易（按 'n' 檢視）[/]"),
 
+    "log.rh_switched": (
+        "[b cyan]switched → Robinhood main account (VIEW ONLY)[/] — buy, sell, "
+        "arm and every other trading key are off here",
+        "[b cyan]已切換 → Robinhood 主帳戶（僅檢視）[/] — 買、賣、解鎖及所有交易鍵"
+        "在此皆停用"),
+    "log.rh_view_only": (
+        "[yellow]Robinhood is view only — trading, arming, orders view, strategy "
+        "and core-hold keys are off on this wallet[/]",
+        "[yellow]Robinhood 僅供檢視 — 此錢包停用交易、解鎖、掛單檢視、策略與核心持股鍵[/]"),
+    "log.rh_reading": ("[dim]reading Robinhood now (about 15 seconds)…[/]",
+                       "[dim]正在讀取 Robinhood（約 15 秒）…[/]"),
+    "log.rh_read_ok": ("[green]Robinhood read: {msg}[/]", "[green]Robinhood 已讀取：{msg}[/]"),
+    "log.rh_read_fail": ("[red]Robinhood read failed: {msg}[/]",
+                         "[red]Robinhood 讀取失敗：{msg}[/]"),
+    "log.rh_busy": ("[dim]a Robinhood read is already running[/]",
+                    "[dim]Robinhood 讀取已在進行中[/]"),
+
     # ── arm / refresh logs ────────────────────────────────────────────────────
     "log.arm_closed": (
         "[yellow]⚠ Market CLOSED — any orders you place now will not fill "
@@ -392,6 +432,10 @@ _TABLE: dict[str, tuple[str, str]] = {
 
     # ── chart ─────────────────────────────────────────────────────────────────
     "chart.pf": ("PORTFOLIO (equity)", "投資組合（權益）"),
+    "chart.rh_pf": ("ROBINHOOD (account value)", "Robinhood（帳戶價值）"),
+    "chart.rh_pf_empty": (
+        "Robinhood account value — the chart fills in as the dashboard reads the account",
+        "Robinhood 帳戶價值 — 圖表會隨儀表板每次讀取逐步累積"),
     "chart.holding": ("holding {sym}", "持倉 {sym}"),
     "chart.research": ("research {label} (not held)", "研究 {label}（未持有）"),
     "log.chart_to": ("[cyan]chart → {where}[/]", "[cyan]圖表 → {where}[/]"),

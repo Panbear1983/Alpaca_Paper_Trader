@@ -71,6 +71,7 @@ import compare as cmpw
 import i18n
 from i18n import t
 import price_streaks as ps
+import robinhood_view as rhv
 
 try:
     import telegram_notifier as tg
@@ -388,6 +389,24 @@ def _code_mtime() -> float:
 _TIMEFRAME_KEYS = ["1D", "1W", "1M", "3M", "6M", "1Y"]
 
 PORTFOLIO_SUBJECT = "__PORTFOLIO__"
+# The Robinhood main account is a dashboard-only, view-only "wallet": it is
+# deliberately NOT in the wallet registry (that drives the trading engines).
+ROBINHOOD_KEY = "__ROBINHOOD__"
+
+
+def _age_text(seconds: float | None) -> str:
+    """Plain "how long ago" for the Robinhood freshness line."""
+    if seconds is None:
+        return "?"
+    m = int(seconds // 60)
+    if m < 1:
+        return "<1 min"
+    if m < 60:
+        return f"{m} min"
+    h, m = divmod(m, 60)
+    if h < 48:
+        return f"{h} h {m} min" if m else f"{h} h"
+    return f"{h // 24} days"
 
 
 def _resolve_chart_subject(portfolio_mode: bool, search_sym: str, sel_sym: str) -> str:
@@ -1242,16 +1261,25 @@ class WalletModal(ModalScreen[str | None]):
     def _populate(self) -> None:
         t = self.query_one("#wallettable", DataTable)
         t.clear()
+        rh_on = bool(getattr(self.app, "_rh_mode", False))
         for winfo in wl.list_wallets():
-            mark = "●" if winfo["is_current"] else " "
+            current = winfo["is_current"] and not rh_on
+            mark = "●" if current else " "
             if winfo["configured"]:
-                status = (i18n.t("wal.active") if winfo["is_current"]
+                status = (i18n.t("wal.active") if current
                           else i18n.t("wal.ready"))
                 acct = self._acct_nums.get(winfo["name"], "…")
             else:
                 status = i18n.t("wal.missing", vars=" / ".join(winfo["missing"]))
                 acct = "—"
             t.add_row(mark, winfo["name"], acct, status, key=winfo["name"])
+        # Robinhood main account: dashboard-only and view-only (never traded).
+        snap = rhv.load_snapshot()
+        last4 = (snap or {}).get("account_last4", "")
+        t.add_row("●" if rh_on else " ", i18n.t("wal.rh_name"),
+                  f"••{last4}" if last4 else "…",
+                  i18n.t("wal.rh_active") if rh_on else i18n.t("wal.rh_view_only"),
+                  key=ROBINHOOD_KEY)
 
     @work(thread=True, exclusive=True, group="wallet_probe")
     def _probe_accounts(self) -> None:
@@ -1326,6 +1354,9 @@ class WalletModal(ModalScreen[str | None]):
         old = self._selected_wallet()
         if not old:
             return
+        if old == ROBINHOOD_KEY:
+            self.query_one("#wallet_err", Label).update(t("wal.rh_no_rename"))
+            return
         def after(new):
             if not new:
                 return
@@ -1344,6 +1375,9 @@ class WalletModal(ModalScreen[str | None]):
         event.stop()
         name = str(event.row_key.value) if event.row_key else ""
         if not name:
+            return
+        if name == ROBINHOOD_KEY:
+            self.dismiss(name)
             return
         if not wl.is_configured(name):
             miss = ", ".join(wl.missing_envs(name))
@@ -1755,6 +1789,8 @@ class AlpacaTUI(App):
         self._bio_zh: dict[str, str] = {}      # symbol → 繁體中文 bio translation
         self._bio_perf: dict[str, dict] = {}   # symbol → {"1M"/"1Y"/"ALL": pct}
         self._bio_sym: str = ""                # symbol currently shown in #bio
+        self._rh_mode: bool = False            # True = viewing the Robinhood main account (view only)
+        self._rh_cache: tuple | None = None    # last (snapshot, live prices, clock) shown, for language re-render
         self._boot_code_mtime: float = _code_mtime()  # stale-window detection
         self._stale_warned: bool = False
 
@@ -1807,6 +1843,10 @@ class AlpacaTUI(App):
         # + same dedup stamp as report_scheduler.py, so the two paths can
         # never double-push.
         self.set_interval(60, self._report_autopush_tick)
+        # Robinhood main account reader (view only): checks every minute
+        # whether a read is due — every few minutes while the market is open.
+        self.set_timer(20, self._rh_tick)
+        self.set_interval(60, self._rh_tick)
 
     def _check_code_freshness(self) -> None:
         """Warn (once, loudly) when the code on disk is newer than this
@@ -1922,6 +1962,9 @@ class AlpacaTUI(App):
 
     # ── strategy tunables editor (n) — see config_fields.py for the registry ──
     def action_edit_strategy(self) -> None:
+        if self._rh_mode:
+            self._log(t("log.rh_view_only"))
+            return
         self.push_screen(StrategyConfigModal(list(self._syms)))
 
     # ── wallet switcher (k) — swap the active Alpaca paper account ────────────
@@ -1932,16 +1975,25 @@ class AlpacaTUI(App):
         self.push_screen(WalletModal(), after)
 
     def _do_switch_wallet(self, name: str) -> None:
-        if name == wl.current():
+        if name == ROBINHOOD_KEY:
+            if self._rh_mode:
+                self._log(t("log.wallet_same", name=t("wal.rh_name")))
+                return
+            self._enter_robinhood()
+            return
+        if name == wl.current() and not self._rh_mode:
             self._log(t("log.wallet_same", name=name))
             return
-        ok, msg = wl.apply(name)
-        if not ok:
-            self._log(f"[red]{msg}[/]")
-            return
+        if name != wl.current():
+            ok, msg = wl.apply(name)
+            if not ok:
+                self._log(f"[red]{msg}[/]")
+                return
         # Safety: never carry an armed state across accounts (arm on Main →
         # switch → flatten would hit the wrong book).
         self.armed = False
+        self._rh_mode = False
+        self._rh_cache = None
         strategies.set_active(name)     # 'n' editor + engines follow the wallet
         # Data for the previous account is now stale — drop every cache and the
         # cursor selection, then force a fresh pull for the new account.
@@ -1955,6 +2007,60 @@ class AlpacaTUI(App):
         if name != wl.default_name():
             self._log(t("log.wallet_engines", name=name))
         self.refresh_data()
+
+    def _enter_robinhood(self) -> None:
+        """Show the Robinhood main account. View only: nothing on this wallet
+        can place, cancel or change an order — the Alpaca credentials stay on
+        the last Alpaca wallet and every trading key is refused while here."""
+        self.armed = False
+        self._rh_mode = True
+        if self._view_mode != "positions":
+            self._view_mode = "positions"
+            self._set_table_columns()
+        self._hist_cache.clear()
+        self._series.clear()
+        self._price.clear()
+        self._sel_sym = ""
+        self._candles = []
+        self._positions_cache = []
+        self._open_orders = []
+        self._clear_search()
+        self._log(t("log.rh_switched"))
+        self.refresh_data()
+        snap = rhv.load_snapshot()
+        age = rhv.age_seconds(snap)
+        if age is None or age >= float(rhv.settings()["read_every_minutes"]) * 60:
+            self._log(t("log.rh_reading"))
+            self._rh_read(force=True)
+
+    # ── Robinhood reader (view only) ─────────────────────────────────────────
+    def _rh_tick(self) -> None:
+        try:
+            if rhv.read_is_due(rhv.load_snapshot(), rhv.load_status(), self.market_open):
+                self._rh_read()
+        except Exception as e:
+            self._log(t("log.rh_read_fail", msg=e))
+
+    @work(thread=True, group="rh_read")
+    def _rh_read(self, force: bool = False) -> None:
+        ok, msg = rhv.run_reader(market_open=self.market_open)
+        self.call_from_thread(self._rh_read_done, ok, msg, force)
+
+    def _rh_read_done(self, ok: bool | None, msg: str, force: bool) -> None:
+        if ok is None:
+            if force:
+                self._log(t("log.rh_busy"))
+        elif ok:
+            if force or self._rh_mode:
+                self._log(t("log.rh_read_ok", msg=msg))
+        else:
+            # Always say so on the wallet itself or when asked; elsewhere only
+            # the first failure of a streak, so a long outage is not log spam.
+            fails = int(rhv.load_status().get("consecutive_failures") or 0)
+            if force or self._rh_mode or fails == 1:
+                self._log(t("log.rh_read_fail", msg=msg))
+        if self._rh_mode:
+            self.refresh_data()
 
     def action_compare_wallets(self) -> None:
         """Side-by-side performance of every configured wallet (read-only)."""
@@ -1983,7 +2089,9 @@ class AlpacaTUI(App):
         self.query_one("#ticker_search", Input).placeholder = t("ui.search_ph")
         self.watch_armed(self.armed)
         self._set_table_columns()
-        if self._acct_cache is not None:
+        if self._rh_mode and self._rh_cache is not None:
+            self._apply_rh(*self._rh_cache)
+        elif self._acct_cache is not None and not self._rh_mode:
             self._apply(self._acct_cache, self._positions_cache,
                         self._clk_cache, self._open_orders)
         else:
@@ -1998,6 +2106,10 @@ class AlpacaTUI(App):
         self.push_screen(ManualModal())
 
     def action_arm(self) -> None:
+        if self._rh_mode:
+            self.armed = False
+            self._log(t("log.rh_view_only"))
+            return
         self.armed = not self.armed
         if self.armed and self.market_open is False:
             self._log(t("log.arm_closed", next=self._next_open))
@@ -2010,6 +2122,9 @@ class AlpacaTUI(App):
             bar.update(t("armbar.disarmed"))
 
     def _require_armed(self) -> bool:
+        if self._rh_mode:                 # Robinhood is view only — no orders, ever
+            self._log(t("log.rh_view_only"))
+            return False
         if not self.armed:
             self._log(t("log.need_arm"))
             return False
@@ -2018,10 +2133,16 @@ class AlpacaTUI(App):
     # ── data refresh ───────────────────────────────────────────────────────--
     def action_refresh(self) -> None:
         self._log(t("log.refreshing"))
+        if self._rh_mode:                 # 'r' on Robinhood = read the account now
+            self._log(t("log.rh_reading"))
+            self._rh_read(force=True)
         self.refresh_data()
 
     @work(thread=True, exclusive=True, group="data")
     def refresh_data(self) -> None:
+        if self._rh_mode:
+            self._refresh_robinhood()
+            return
         try:
             acct = hr.fetch_account()
             positions = hr.fetch_positions()
@@ -2043,6 +2164,82 @@ class AlpacaTUI(App):
         syms = [p.get("symbol") for p in positions if p.get("symbol")]
         if any(not ps.get_cached_bars(s) for s in syms):
             self.refresh_streaks()
+
+    def _refresh_robinhood(self) -> None:
+        """Worker-thread body of refresh_data for the Robinhood view: the saved
+        snapshot (read every few minutes) plus Alpaca's live trade prices while
+        the market is open, so the table moves every 8 seconds."""
+        snap = rhv.load_snapshot()
+        try:
+            clk = im.get_clock()
+        except Exception:
+            clk = None
+        live = {}
+        if snap and clk and clk.get("is_open"):
+            syms = [p["symbol"] for p in snap.get("positions") or []]
+            live = rhv.fetch_live_prices(syms, hr.HEADERS, hr.ALPACA_DATA)
+        self.call_from_thread(self._apply_rh, snap, live, clk)
+        self._hist_cache.clear()
+        self.call_from_thread(self._fetch_and_render)
+        syms = [p["symbol"] for p in (snap or {}).get("positions") or []]
+        if any(not ps.get_cached_bars(s) for s in syms):
+            self.refresh_streaks()
+
+    def _apply_rh(self, snap: dict | None, live: dict, clk: dict | None) -> None:
+        """Robinhood counterpart of _apply: summary, badge, freshness, table."""
+        if not self._rh_mode:              # a late refresh after leaving the view
+            return
+        self._tick += 1
+        self._rh_cache = (snap, live, clk)
+        self._clk_cache = clk
+        mkt = self._market_badge(clk)
+        status = rhv.load_status()
+        st = rhv.settings()
+        err = status.get("last_error") or ""
+        summary = self.query_one("#summary", Static)
+        if not snap:
+            self._positions_cache, self._open_orders = [], []
+            self._repopulate_table()
+            line = t("rh.none")
+            if err:
+                line += "\n" + t("rh.lasterr", err=err)
+            summary.update(f"{line}\n{self._wallet_badge()}  {mkt}")
+            return
+        acct, positions, info = rhv.view(snap, live)
+        self._positions_cache = positions
+        self._open_orders = []
+        self._cash = acct["cash"]
+        self._equity = acct["equity"]
+        self._lmv = acct["long_market_value"]
+        dpl, upl = info["day_pl"], info["upl"]
+        line1 = t("sum.rh_line",
+                  value=f"{acct['equity']:,.2f}", stocks=f"{self._lmv:,.2f}",
+                  cash=f"{self._cash:,.2f}", bp=f"{acct['buying_power']:,.2f}",
+                  pc="green" if dpl >= 0 else "red", daypl=f"{dpl:+,.2f}",
+                  daypct=f"{info['day_pct']:+.2f}",
+                  uc="green" if upl >= 0 else "red", upl=f"{upl:+,.2f}",
+                  uplpct=f"{info['upl_pct']:+.2f}")
+        age = rhv.age_seconds(snap)
+        if self.market_open and age is not None and age > float(st["stale_warn_minutes"]) * 60:
+            line3 = t("rh.stale", age=_age_text(age), err=err)
+        else:
+            line3 = t("rh.fresh", age=_age_text(age), every=st["read_every_minutes"],
+                      live=t("rh.live") if info["live_prices"] else "")
+            if err and int(status.get("consecutive_failures") or 0) > 0:
+                line3 += "  " + t("rh.lasterr", err=err)
+        summary.update(f"{line1}\n{self._wallet_badge()}  {mkt}\n{line3}")
+        now_ts = dt.datetime.now().timestamp()
+        buf = self._series.setdefault(PORTFOLIO_SUBJECT, [])
+        buf.append((now_ts, acct["equity"]))
+        del buf[:-240]
+        for p in positions:
+            self._price[p["symbol"]] = p["current_price"]
+        self._repopulate_table()
+        sig = (len(positions), 0, "robinhood")
+        if sig != getattr(self, "_last_refresh_sig", None):
+            self._last_refresh_sig = sig
+            self._log(t("log.refreshed", n=len(positions), orders="",
+                        time=f"{dt.datetime.now():%H:%M:%S}"))
 
     @work(thread=True, exclusive=True, group="streaks")
     def refresh_streaks(self) -> None:
@@ -2253,12 +2450,15 @@ class AlpacaTUI(App):
         """Fetch historical bars from Alpaca API in a background thread."""
         subj = self._chart_subject()
         rng = self._chart_range
-        cache_key = f"{rng}:{subj}"
+        rh = self._rh_mode
+        cache_key = f"{'rh:' if rh else ''}{rng}:{subj}"
         if cache_key not in self._hist_cache:
             if not subj:
                 self.call_from_thread(self._render_candles, [])
                 return
-            if subj == PORTFOLIO_SUBJECT:
+            if subj == PORTFOLIO_SUBJECT and rh:
+                bars = rhv.history_bars(rng)      # built from the dashboard's own reads
+            elif subj == PORTFOLIO_SUBJECT:
                 bars = hr.fetch_portfolio_history_ranged(rng)
             else:
                 bars = hr.fetch_bars_ranged(subj, rng)
@@ -2275,7 +2475,7 @@ class AlpacaTUI(App):
         subj = self._chart_subject()
         rng = self._chart_range
         if subj == PORTFOLIO_SUBJECT:
-            label = t("chart.pf")
+            label = t("chart.rh_pf") if self._rh_mode else t("chart.pf")
         else:
             label = subj or "—"
             name = self._names.get(subj, "")
@@ -2290,8 +2490,13 @@ class AlpacaTUI(App):
             return
         if bars is None:
             # Fallback: try cache
-            cache_key = f"{rng}:{subj}"
+            cache_key = f"{'rh:' if self._rh_mode else ''}{rng}:{subj}"
             bars = self._hist_cache.get(cache_key, [])
+        if not bars and subj == PORTFOLIO_SUBJECT and self._rh_mode:
+            plt.title(t("chart.rh_pf_empty"))
+            self._candles = []
+            plot.refresh()
+            return
         if not bars:
             plt.title(t("chart.loading", label=label, rng=rng))
             self._candles = []
@@ -2362,6 +2567,9 @@ class AlpacaTUI(App):
         """Active-wallet chip for the summary line — always visible so manual
         actions (flatten/sell/…) can never be aimed at the wrong account by
         mistake. Default account = blue; any other = magenta (stands out)."""
+        if self._rh_mode:
+            snap = (self._rh_cache or (None,))[0] or rhv.load_snapshot() or {}
+            return t("rh.badge", last4=snap.get("account_last4", "????"))
         name = wl.current()
         style = "white on blue" if name == wl.default_name() else "white on magenta"
         return f"[b {style}] 💼 {name} [/]"
@@ -2390,6 +2598,8 @@ class AlpacaTUI(App):
 
     def _apply(self, acct: dict, positions: list[dict], clk: dict | None = None,
                open_orders: list[dict] | None = None) -> None:
+        if self._rh_mode:                  # a late Alpaca refresh after switching to Robinhood
+            return
         self._tick += 1
         self._acct_cache = acct
         self._clk_cache = clk
@@ -2459,6 +2669,8 @@ class AlpacaTUI(App):
     # ── core holds (key C) ────────────────────────────────────────────────────
     def _core_holds(self) -> list[str]:
         """Names flagged CORE for the active wallet (anchor.core_holds)."""
+        if self._rh_mode:
+            return []
         try:
             a = strategies.load_strategy(wl.current()).get("anchor") or {}
             return [str(s).upper() for s in (a.get("core_holds") or [])]
@@ -2472,6 +2684,9 @@ class AlpacaTUI(App):
         so it can compound. Caps and the trailing stop still apply. Written to
         the wallet's strategy file, so every process sees it on its next read.
         """
+        if self._rh_mode:
+            self._log(t("log.rh_view_only"))
+            return
         sym = self._sel_sym
         if self._view_mode != "positions" or not sym:
             self._log(t("log.core_nosel"))
@@ -2583,6 +2798,9 @@ class AlpacaTUI(App):
 
     # ── view toggle (v) ───────────────────────────────────────────────────────
     def action_view_toggle(self) -> None:
+        if self._rh_mode:
+            self._log(t("log.rh_view_only"))
+            return
         self._view_mode = "orders" if self._view_mode == "positions" else "positions"
         self._set_table_columns()
         self._repopulate_table()

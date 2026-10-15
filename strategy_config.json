@@ -42,6 +42,12 @@
       }
     }
   },
+  "robinhood_view": {
+    "enabled": true,
+    "read_every_minutes": 5,
+    "closed_every_hours": 12,
+    "stale_warn_minutes": 15
+  },
   "dynamic_exits": {
     "trail_trigger_pct": 0.5,
     "trail_giveback_pct": 0.15
