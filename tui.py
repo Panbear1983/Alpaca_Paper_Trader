@@ -1508,22 +1508,22 @@ class CompareScreen(ModalScreen[None]):
             return "m/d H:M", "%m/%d %H:%M"
         return "m/d", "%m/%d"
 
-    def _hist_labels(self, hist: list[tuple[str, float]], fmt: str,
-                     intraday: bool) -> tuple[list[str], list[float]]:
+    def _hist_labels(self, hist: list[tuple[str, float]], fmt: str
+                     ) -> tuple[list[str], list[float]]:
         """Format history timestamps for plotext; skip unparseable points
         (a bad label makes plotext raise and kills the plot).
 
-        DAILY points are stamped by Alpaca at 00:00 UTC of the session date
-        but carry that session's CLOSE — converting them to ET shifts every
-        label back a day (07/14's close showed as 07/13). Only intraday
-        windows get the ET conversion; daily windows keep the UTC calendar
-        date."""
+        Every point is labelled in ET. DAILY points are stamped by Alpaca at
+        00:00 UTC of the day AFTER the session whose close they carry
+        (Friday's close is stamped Saturday 00:00 UTC = Friday 20:00 ET), so
+        the UTC date was a day late and the ET date is the session. Checked
+        2026-10-14 on six months of High Risk and Low Risk history: UTC
+        stamps fall Tue-Sat, ET dates Mon-Fri, and each point matches that
+        session's 16:00 ET intraday equity."""
         ds, ys = [], []
         for iso, eq in hist:
             try:
-                d = dt.datetime.fromisoformat(iso)
-                if intraday:
-                    d = d.astimezone(_ET)
+                d = dt.datetime.fromisoformat(iso).astimezone(_ET)
             except Exception:
                 continue
             ds.append(d.strftime(fmt))
@@ -1582,8 +1582,7 @@ class CompareScreen(ModalScreen[None]):
         try:
             plt.date_form(date_form)
             for r in ranked:
-                ds, ys = self._hist_labels(r.get("hist", []), fmt,
-                                           rng in ("1D", "1W"))
+                ds, ys = self._hist_labels(r.get("hist", []), fmt)
                 base = r.get("baseline_usd") or cmpw.ACCOUNT_BASELINE_USD
                 if len(ds) < 2 or not base:
                     continue
@@ -1617,8 +1616,7 @@ class CompareScreen(ModalScreen[None]):
                 f"[b]{name}[/]   equity [b]${r['equity']:,.0f}[/] · "
                 f"vs $100k [b]{wr_txt}[/] · cash ${r['cash']:,.0f} · "
                 f"exposure {r['exposure']:.2f}x · {r['npos']} positions")
-            ds, ys = self._hist_labels(r.get("hist", []), fmt,
-                                       rng in ("1D", "1W"))
+            ds, ys = self._hist_labels(r.get("hist", []), fmt)
             try:
                 if len(ds) >= 2:
                     cplt.date_form(date_form)
